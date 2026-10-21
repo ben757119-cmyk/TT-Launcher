@@ -21,7 +21,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
+          # no cache: npm — requires package-lock.json which we don't commit yet
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -32,7 +32,6 @@ jobs:
       - name: Package Windows (NSIS + portable)
         run: npx electron-builder --win --x64 --publish never
         env:
-          # electron-builder on CI (unsigned)
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
       - name: List release artifacts
@@ -49,7 +48,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Create GitHub Release (on main push with tag-style version)
+      - name: Create GitHub Release
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         uses: softprops/action-gh-release@v2
         with:
