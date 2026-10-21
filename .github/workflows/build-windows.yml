@@ -1,0 +1,65 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build renderer + electron
+        run: npm run build
+
+      - name: Package Windows (NSIS + portable)
+        run: npx electron-builder --win --x64 --publish never
+        env:
+          # electron-builder on CI (unsigned)
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: List release artifacts
+        run: Get-ChildItem -Recurse release | Format-Table Name, Length
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TT-Launcher-Windows
+          path: |
+            release/*.exe
+            release/*.yml
+            release/latest*.yml
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Create GitHub Release (on main push with tag-style version)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: TT Launcher build ${{ github.run_number }}
+          draft: false
+          prerelease: true
+          files: |
+            release/*.exe
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
