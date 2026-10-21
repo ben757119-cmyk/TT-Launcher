@@ -21,12 +21,12 @@ type Tab =
 const NAV: { id: Tab; label: string; icon: string }[] = [
   { id: 'home', label: 'Home', icon: '⌂' },
   { id: 'play', label: 'Play', icon: '▶' },
-  { id: 'packs', label: 'Resource Packs', icon: '▣' },
-  { id: 'mods', label: 'Mods & Add-ons', icon: '⬡' },
-  { id: 'instances', label: 'Instances', icon: '▦' },
-  { id: 'accounts', label: 'Accounts', icon: '☺' },
+  { id: 'packs', label: 'Packs', icon: '▣' },
+  { id: 'mods', label: 'Mods', icon: '⬡' },
+  { id: 'instances', label: 'Worlds', icon: '▦' },
+  { id: 'accounts', label: 'Account', icon: '☺' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
-  { id: 'about', label: 'About TT', icon: '✦' },
+  { id: 'about', label: 'About', icon: '✦' },
 ];
 
 export default function App() {
@@ -61,7 +61,16 @@ export default function App() {
   const page = (() => {
     switch (tab) {
       case 'home':
-        return <Home account={account} instance={instance} meta={meta} onNavigate={setTab} toast={toast} refresh={refresh} />;
+        return (
+          <Home
+            account={account}
+            instance={instance}
+            meta={meta}
+            onNavigate={setTab}
+            toast={toast}
+            refresh={refresh}
+          />
+        );
       case 'play':
         return <Play account={account} instance={instance} toast={toast} refresh={refresh} />;
       case 'packs':
@@ -86,39 +95,36 @@ export default function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">TT</div>
-          <div className="brand-text">
-            <strong>TT Launcher</strong>
-            <span>The Third</span>
-          </div>
         </div>
         {NAV.map((n) => (
           <button
             key={n.id}
             className={`nav-btn ${tab === n.id ? 'active' : ''}`}
             onClick={() => setTab(n.id)}
+            title={n.label}
           >
-            <span style={{ width: 18, textAlign: 'center', opacity: 0.8 }}>{n.icon}</span>
-            {n.label}
+            <span className="nav-ico">{n.icon}</span>
+            <span>{n.label}</span>
           </button>
         ))}
+        <div className="sidebar-bottom">
+          <button
+            className="avatar-chip"
+            onClick={() => setTab('accounts')}
+            title={account ? account.name : 'Sign in'}
+          >
+            {account?.avatarUrl ? (
+              <img src={account.avatarUrl} alt="" />
+            ) : (
+              (account?.name || '?').slice(0, 2).toUpperCase()
+            )}
+          </button>
+        </div>
       </aside>
 
       <main className="main">{page}</main>
 
-      <footer className="status-bar">
-        <span>
-          <i className="dot" />
-          {instance ? instance.name : 'No instance'}
-        </span>
-        <span>
-          {account ? account.name : 'Not signed in'}
-          {account?.type === 'offline' ? ' (offline)' : ''}
-        </span>
-        <span className="spacer" />
-        <span>TT Launcher {meta?.launcherVersion || '…'}</span>
-      </footer>
-
-      <div className="toast-host">
+      <div className="toast-stack">
         {toasts.map((t) => (
           <div key={t.id} className="toast">
             {t.text}
