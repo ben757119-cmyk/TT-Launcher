@@ -101,7 +101,6 @@ export async function signInMicrosoft(
 
   try {
     const xbox = await authManager.launch('electron', {
-      // @ts-expect-error msmc accepts client id via env in some versions; pass where supported
       clientid: clientId,
     } as any);
 
