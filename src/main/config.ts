@@ -2,7 +2,7 @@
  * TT Launcher configuration — release sources and compatibility metadata.
  */
 
-export const LAUNCHER_VERSION = '1.3.0';
+export const LAUNCHER_VERSION = '1.3.1';
 
 /** Public credits / support (shown in About). */
 export const TT_OWNER = {
@@ -34,7 +34,7 @@ export const TT_WEBSITE = 'https://tt-client-oogley.vercel.app';
 export const MS_CLIENT_ID = process.env.TT_MS_CLIENT_ID || '';
 
 export const MODRINTH_API = 'https://api.modrinth.com/v2';
-export const MODRINTH_USER_AGENT = 'TT-Launcher/1.3.0 (github.com/ben757119-cmyk/TT-Client)';
+export const MODRINTH_USER_AGENT = 'TT-Launcher/1.3.1 (github.com/ben757119-cmyk/TT-Client)';
 
 export const DEFAULT_MEMORY_MB = 4096;
 export const DEFAULT_WIDTH = 1280;
