@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import path from 'path';
-import { LAUNCHER_VERSION, TT_COMPAT, TT_WEBSITE } from './config';
+import { LAUNCHER_VERSION, TT_COMPAT, TT_WEBSITE, TT_OWNER } from './config';
 import { getStore } from './store';
 import { log } from './logger';
 import * as auth from './auth';
@@ -9,14 +9,11 @@ import * as ttInstall from './tt-install';
 import * as packs from './packs';
 import * as modrinth from './modrinth';
 import * as launch from './launch';
+import * as vanilla from './vanilla-mc';
 
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
-  // Compiled layout:
-  //   dist-electron/main/main.js   (this file)
-  //   dist-electron/main/preload.js
-  //   dist/index.html              (Vite renderer, two levels up)
   const preloadPath = path.join(__dirname, 'preload.js');
   const indexHtml = path.join(__dirname, '..', '..', 'dist', 'index.html');
 
@@ -64,6 +61,17 @@ function send(channel: string, payload: unknown) {
 
 app.whenReady().then(() => {
   log.info('TT Launcher starting', { version: LAUNCHER_VERSION });
+  try {
+    const setup = vanilla.setupVanillaIntegration();
+    log.info('Vanilla .minecraft integration', {
+      mcDir: setup.mcDir,
+      jar: !!setup.jar,
+      pack: !!setup.pack,
+      account: setup.account?.name,
+    });
+  } catch (e) {
+    log.warn('setupVanillaIntegration failed', { err: String(e) });
+  }
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -74,12 +82,12 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
 
-// ── IPC ──────────────────────────────────────────────
-
 ipcMain.handle('app:getMeta', async () => ({
   launcherVersion: LAUNCHER_VERSION,
   ttCompat: TT_COMPAT,
   website: TT_WEBSITE,
+  owner: TT_OWNER,
+  minecraftDir: vanilla.getDefaultMinecraftDir(),
   logPath: log.path(),
   platform: process.platform,
 }));
@@ -127,6 +135,20 @@ ipcMain.handle('tt:fetchReleases', async () => ttInstall.fetchTtReleases());
 ipcMain.handle('tt:install', async (_e, tag?: string) => {
   return ttInstall.installTtClient((s) => send('tt:installProgress', s), tag);
 });
+ipcMain.handle('tt:installBundled', async () => {
+  const r = vanilla.installBundledTtIntoMinecraft();
+  const pack = vanilla.installBundledPackIntoMinecraft();
+  if (!r) throw new Error('Bundled TT Client JAR missing from launcher package.');
+  return { jarPath: r.jarPath, packPath: pack?.packPath };
+});
+ipcMain.handle('tt:setEnabled', async (_e, enabled: boolean) => {
+  vanilla.setTtModEnabled(!!enabled);
+  const store = getStore();
+  const s = store.get('settings') as any;
+  s.ttClientEnabled = !!enabled;
+  store.set('settings', s);
+  return store.get('settings');
+});
 ipcMain.handle('tt:installFromFile', async () => {
   const res = await dialog.showOpenDialog({
     title: 'Select TT Client JAR',
@@ -166,6 +188,10 @@ ipcMain.handle('packs:setEnabled', async (_e, id, enabled) => {
 ipcMain.handle('modrinth:search', async (_e, opts) => modrinth.searchProjects(opts));
 ipcMain.handle('modrinth:project', async (_e, id) => modrinth.getProject(id));
 ipcMain.handle('modrinth:versions', async (_e, id, opts) => modrinth.getVersions(id, opts));
+
+ipcMain.handle('vanilla:setup', async () => vanilla.setupVanillaIntegration());
+ipcMain.handle('vanilla:importAccount', async () => vanilla.importOfficialLauncherAccount());
+ipcMain.handle('vanilla:mcDir', async () => vanilla.getDefaultMinecraftDir());
 
 ipcMain.handle('launch:play', async () => launch.launchGame());
 ipcMain.handle('launch:stop', async () => {
