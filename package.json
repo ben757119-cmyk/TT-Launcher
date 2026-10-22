@@ -1,6 +1,6 @@
 {
   "name": "tt-launcher",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "TT Launcher — The Third. Official desktop launcher for TT Client (NeoForge 26.2).",
   "main": "dist-electron/main/main.js",
   "author": "TT Client / The Third",
@@ -29,6 +29,13 @@
       "dist/**/*",
       "dist-electron/**/*",
       "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/bundled",
+        "to": "bundled",
+        "filter": ["**/*"]
+      }
     ],
     "win": {
       "target": [
