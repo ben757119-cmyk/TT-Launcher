@@ -13,15 +13,23 @@ import * as launch from './launch';
 let mainWindow: BrowserWindow | null = null;
 
 function createWindow() {
+  // Compiled layout:
+  //   dist-electron/main/main.js   (this file)
+  //   dist-electron/main/preload.js
+  //   dist/index.html              (Vite renderer, two levels up)
+  const preloadPath = path.join(__dirname, 'preload.js');
+  const indexHtml = path.join(__dirname, '..', '..', 'dist', 'index.html');
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
     minWidth: 1024,
     minHeight: 640,
-    backgroundColor: '#0a0b0f',
+    backgroundColor: '#0a0a0f',
     title: 'TT Launcher — The Third',
+    autoHideMenuBar: true,
     webPreferences: {
-      preload: path.join(__dirname, '../preload/preload.js'),
+      preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
@@ -31,10 +39,17 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
 
+  mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
+    log.error('Renderer failed to load', { code, desc, url, indexHtml, preloadPath });
+  });
+
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL);
   } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    log.info('Loading renderer', { indexHtml, preloadPath });
+    mainWindow.loadFile(indexHtml).catch((err) => {
+      log.error('loadFile failed', { err: String(err), indexHtml });
+    });
   }
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
