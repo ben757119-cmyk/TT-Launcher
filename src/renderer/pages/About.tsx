@@ -1,6 +1,12 @@
 type Props = { meta: any };
 
 export default function About({ meta }: Props) {
+  const owner = meta?.owner || {
+    name: 'The_Algorithm67',
+    email: 'ben757119@gmail.com',
+    discord: '@pyforge_',
+  };
+
   return (
     <div>
       <h1 className="page-title">About TT</h1>
@@ -15,6 +21,22 @@ export default function About({ meta }: Props) {
           </div>
         </div>
         <dl className="kv" style={{ marginTop: 16 }}>
+          <dt>Main owner</dt>
+          <dd>{owner.name}</dd>
+          <dt>Help / support</dt>
+          <dd>
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                window.tt.openExternal(`mailto:${owner.email}`);
+              }}
+            >
+              {owner.email}
+            </a>
+          </dd>
+          <dt>Discord</dt>
+          <dd>{owner.discord}</dd>
           <dt>Target</dt>
           <dd>
             Minecraft {meta?.ttCompat?.minecraft} · NeoForge {meta?.ttCompat?.neoforge}
@@ -35,9 +57,9 @@ export default function About({ meta }: Props) {
           <dd>TT = The Third</dd>
         </dl>
         <p style={{ marginTop: 16, color: 'var(--text-dim)', lineHeight: 1.55 }}>
-          This launcher uses legitimate Microsoft authentication, Modrinth for discovery, and
-          GitHub Releases for TT Client artifacts. It does not distribute Mojang game files or
-          bypass ownership checks.
+          Uses your normal <code>.minecraft</code> folder (mods + resource packs) and can import the
+          account already signed into the official Minecraft Launcher. For help, email{' '}
+          {owner.email} or Discord {owner.discord}.
         </p>
       </div>
     </div>
