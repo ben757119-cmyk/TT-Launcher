@@ -156,10 +156,17 @@ export function importOfficialLauncherAccount(): AccountRecord | null {
       s.lastSelectedAccountId = record.id;
       store.set('settings', s);
 
-      log.info('Imported official launcher account', { name: record.name, type: record.type, hasToken: !!accessToken });
+      log.info('Imported official launcher account', {
+        name: record.name,
+        type: record.type,
+        hasToken: !!accessToken,
+      });
       return record;
     } catch (e: any) {
-      log.warn('Failed reading official launcher accounts', { file, err: String(e?.message || e) });
+      log.warn('Failed reading official launcher accounts', {
+        file,
+        err: String(e?.message || e),
+      });
     }
   }
   return null;
@@ -175,9 +182,10 @@ export function setupVanillaIntegration(): {
   ensureMinecraftLayout(mcDir);
   const jar = installBundledTtIntoMinecraft(mcDir)?.jarPath;
   const pack = installBundledPackIntoMinecraft(mcDir)?.packPath;
-  let account = getStore().get('accounts')[0];
+  let account: AccountRecord | undefined = getStore().get('accounts')[0];
   if (!account) {
-    account = importOfficialLauncherAccount() || undefined;
+    const imported = importOfficialLauncherAccount();
+    account = imported ?? undefined;
   }
-  return { mcDir, jar, pack, account: account || undefined };
+  return { mcDir, jar, pack, account };
 }
