@@ -3,7 +3,7 @@
  * Edit these when TT Client publish locations change.
  */
 
-export const LAUNCHER_VERSION = '1.0.0';
+export const LAUNCHER_VERSION = '1.2.0';
 
 /** Official TT Client GitHub (private or public). Override via settings if needed. */
 export const TT_GITHUB = {
@@ -41,7 +41,7 @@ export const TT_WEBSITE = 'https://tt-client-oogley.vercel.app';
 export const MS_CLIENT_ID = process.env.TT_MS_CLIENT_ID || '';
 
 export const MODRINTH_API = 'https://api.modrinth.com/v2';
-export const MODRINTH_USER_AGENT = 'TT-Launcher/1.0.0 (github.com/ben757119-cmyk/TT-Client)';
+export const MODRINTH_USER_AGENT = 'TT-Launcher/1.2.0 (github.com/ben757119-cmyk/TT-Client)';
 
 export const DEFAULT_MEMORY_MB = 4096;
 export const DEFAULT_WIDTH = 1280;
