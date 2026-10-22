@@ -1,6 +1,6 @@
 {
   "name": "tt-launcher",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "description": "TT Launcher — The Third by The_Algorithm67. Uses your .minecraft folder + official MC account.",
   "main": "dist-electron/main/main.js",
   "author": "The_Algorithm67 <ben757119@gmail.com>",
