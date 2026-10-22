@@ -32,6 +32,8 @@ const api = {
   fetchTtReleases: () => ipcRenderer.invoke('tt:fetchReleases'),
   installTt: (tag?: string) => ipcRenderer.invoke('tt:install', tag),
   installTtFromFile: () => ipcRenderer.invoke('tt:installFromFile'),
+  installTtBundled: () => ipcRenderer.invoke('tt:installBundled'),
+  setTtEnabled: (enabled: boolean) => ipcRenderer.invoke('tt:setEnabled', enabled),
   onTtInstallProgress: (cb: (p: unknown) => void) => {
     const handler = (_: unknown, p: unknown) => cb(p);
     ipcRenderer.on('tt:installProgress', handler);
@@ -55,6 +57,10 @@ const api = {
   modrinthProject: (id: string) => ipcRenderer.invoke('modrinth:project', id),
   modrinthVersions: (id: string, opts?: unknown) =>
     ipcRenderer.invoke('modrinth:versions', id, opts),
+
+  vanillaSetup: () => ipcRenderer.invoke('vanilla:setup'),
+  importOfficialAccount: () => ipcRenderer.invoke('vanilla:importAccount'),
+  getMinecraftDir: () => ipcRenderer.invoke('vanilla:mcDir'),
 
   play: () => ipcRenderer.invoke('launch:play'),
   stop: () => ipcRenderer.invoke('launch:stop'),
