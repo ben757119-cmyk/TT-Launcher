@@ -1,7 +1,7 @@
 {
   "name": "tt-launcher",
-  "version": "1.3.1",
-  "description": "TT Launcher — The Third by The_Algorithm67. Uses your .minecraft folder + official MC account.",
+  "version": "1.4.0",
+  "description": "TT Launcher — The Third by The_Algorithm67. Direct launch into .minecraft.",
   "main": "dist-electron/main/main.js",
   "author": "The_Algorithm67 <ben757119@gmail.com>",
   "license": "MIT",
@@ -25,28 +25,12 @@
       "output": "release",
       "buildResources": "resources"
     },
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "resources/bundled",
-        "to": "bundled",
-        "filter": ["**/*"]
-      }
-    ],
+    "files": ["dist/**/*", "dist-electron/**/*", "package.json"],
+    "extraResources": [{"from": "resources/bundled", "to": "bundled", "filter": ["**/*"]}],
     "win": {
       "target": [
-        {
-          "target": "nsis",
-          "arch": ["x64"]
-        },
-        {
-          "target": "portable",
-          "arch": ["x64"]
-        }
+        {"target": "nsis", "arch": ["x64"]},
+        {"target": "portable", "arch": ["x64"]}
       ],
       "artifactName": "TT-Launcher-${version}-${arch}.${ext}"
     },
@@ -57,9 +41,7 @@
       "createStartMenuShortcut": true,
       "shortcutName": "TT Launcher"
     },
-    "extraMetadata": {
-      "main": "dist-electron/main/main.js"
-    }
+    "extraMetadata": {"main": "dist-electron/main/main.js"}
   },
   "dependencies": {
     "electron-store": "^8.2.0",
