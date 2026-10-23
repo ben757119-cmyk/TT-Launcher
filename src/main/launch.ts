@@ -135,7 +135,7 @@ function findJava(configured?: string): string | null {
   const scored = candidates
     .filter((c) => {
       try {
-        return c && fs.existsSync(c);
+        return !!c && fs.existsSync(c);
       } catch {
         return false;
       }
@@ -166,6 +166,49 @@ function findJava(configured?: string): string | null {
     /* */
   }
   return null;
+}
+
+function probeJavaVersion(javaPath: string): number {
+  try {
+    const out = execSync(`"${javaPath}" -version 2>&1`, {
+      encoding: 'utf8',
+      timeout: 6000,
+      windowsHide: true,
+      shell: true,
+    });
+    const m = String(out).match(/version "(\d+)/i);
+    if (m) return parseInt(m[1], 10);
+  } catch (e: any) {
+    const msg = `${e?.stdout || ''}${e?.stderr || ''}${e?.message || ''}`;
+    const m = msg.match(/version "(\d+)/i);
+    if (m) return parseInt(m[1], 10);
+  }
+  const lower = javaPath.toLowerCase();
+  if (lower.includes('java-runtime-delta')) return 21;
+  if (lower.includes('java-runtime-gamma')) return 21;
+  if (lower.includes('jdk-24') || lower.includes('jre-24')) return 24;
+  if (lower.includes('jdk-23') || lower.includes('jre-23')) return 23;
+  if (lower.includes('jdk-22') || lower.includes('jre-22')) return 22;
+  if (lower.includes('jdk-21') || lower.includes('jre-21')) return 21;
+  return 21;
+}
+
+/** Drop JVM flags this Java build does not understand. */
+function filterJvmArgs(args: string[], javaMajor: number): string[] {
+  const out: string[] = [];
+  for (const a of args) {
+    if (!a) continue;
+    // Java 23+ only — causes "Could not create the Java Virtual Machine" on Java 21
+    if (a.startsWith('--sun-misc-unsafe-memory-access')) {
+      if (javaMajor >= 23) out.push(a);
+      else log.info('Stripping unsupported JVM flag', { a, javaMajor });
+      continue;
+    }
+    if (a.startsWith('--enable-native-access') && javaMajor < 22) continue;
+    if (a.startsWith('--illegal-native-access') && javaMajor < 24) continue;
+    out.push(a);
+  }
+  return out;
 }
 
 function findLoaderVersion(
@@ -243,9 +286,6 @@ function resolveVersionJson(mcDir: string, versionId: string, depth = 0): any {
     if (json.mainClass) merged.mainClass = json.mainClass;
     if (json.assetIndex) merged.assetIndex = json.assetIndex;
     if (json.assets) merged.assets = json.assets;
-    if (json.minecraftArguments && !merged.arguments?.game?.length) {
-      merged.minecraftArguments = json.minecraftArguments || parent.minecraftArguments;
-    }
     return merged;
   }
   return json;
@@ -260,9 +300,7 @@ function libRulesAllow(lib: any): boolean {
       (rule.os.name === 'windows' && process.platform === 'win32') ||
       (rule.os.name === 'osx' && process.platform === 'darwin') ||
       (rule.os.name === 'linux' && process.platform === 'linux');
-    if (osMatch) {
-      allowed = rule.action === 'allow';
-    }
+    if (osMatch) allowed = rule.action === 'allow';
   }
   return allowed;
 }
@@ -308,12 +346,6 @@ function extractNatives(versionJson: any, mcDir: string, nativesDir: string): vo
       const classifiers = lib.downloads?.classifiers;
       if (classifiers?.[classifier]?.path) {
         nativePath = path.join(libRoot, classifiers[classifier].path);
-      } else if (lib.name) {
-        const parts = String(lib.name).split(':');
-        if (parts.length >= 3) {
-          const [g, a, v] = parts;
-          nativePath = path.join(libRoot, ...g.split('.'), a, v, `${a}-${v}-${classifier}.jar`);
-        }
       }
     } else if (lib.name && String(lib.name).includes(':natives-')) {
       const parts = String(lib.name).split(':');
@@ -324,40 +356,24 @@ function extractNatives(versionJson: any, mcDir: string, nativesDir: string): vo
     }
 
     if (!nativePath || !fs.existsSync(nativePath)) continue;
-
     try {
       if (process.platform === 'win32') {
         execSync(`tar -xf "${nativePath}" -C "${nativesDir}"`, {
-          windowsHide: true,
-          timeout: 15000,
-          stdio: 'ignore',
+          windowsHide: true, timeout: 15000, stdio: 'ignore',
         });
       } else {
         execSync(`unzip -o -q "${nativePath}" -d "${nativesDir}"`, {
-          timeout: 15000,
-          stdio: 'ignore',
+          timeout: 15000, stdio: 'ignore',
         });
       }
     } catch {
-      try {
-        if (process.platform === 'win32') {
-          execSync(
-            `powershell -NoProfile -Command "Add-Type -AssemblyName System.IO.Compression.FileSystem; [IO.Compression.ZipFile]::ExtractToDirectory('${nativePath.replace(/'/g, "''")}', '${nativesDir.replace(/'/g, "''")}', $true)"`,
-            { windowsHide: true, timeout: 20000, stdio: 'ignore' },
-          );
-        }
-      } catch {
-        log.warn('Failed to extract natives', { nativePath });
-      }
+      log.warn('Failed to extract natives', { nativePath });
     }
   }
 }
 
 function expandArg(arg: string, vars: Record<string, string>): string {
-  return arg.replace(/\$\{([^}]+)\}/g, (_, key) => {
-    if (key in vars) return vars[key];
-    return '';
-  });
+  return arg.replace(/\$\{([^}]+)\}/g, (_, key) => (key in vars ? vars[key] : ''));
 }
 
 function rulesAllowArg(rules: any[] | undefined): boolean {
@@ -385,32 +401,24 @@ function buildJvmAndGameArgs(
   const game: string[] = [];
 
   for (const entry of versionJson.arguments?.jvm || []) {
-    if (typeof entry === 'string') {
-      jvm.push(expandArg(entry, vars));
-    } else if (entry && typeof entry === 'object') {
+    if (typeof entry === 'string') jvm.push(expandArg(entry, vars));
+    else if (entry && typeof entry === 'object') {
       if (!rulesAllowArg(entry.rules)) continue;
       const val = entry.value;
-      if (Array.isArray(val)) {
-        for (const v of val) jvm.push(expandArg(String(v), vars));
-      } else if (val != null) {
-        jvm.push(expandArg(String(val), vars));
-      }
+      if (Array.isArray(val)) for (const v of val) jvm.push(expandArg(String(v), vars));
+      else if (val != null) jvm.push(expandArg(String(val), vars));
     }
   }
 
   const gameArgs = versionJson.arguments?.game || [];
   if (gameArgs.length) {
     for (const entry of gameArgs) {
-      if (typeof entry === 'string') {
-        game.push(expandArg(entry, vars));
-      } else if (entry && typeof entry === 'object') {
+      if (typeof entry === 'string') game.push(expandArg(entry, vars));
+      else if (entry && typeof entry === 'object') {
         if (!rulesAllowArg(entry.rules)) continue;
         const val = entry.value;
-        if (Array.isArray(val)) {
-          for (const v of val) game.push(expandArg(String(v), vars));
-        } else if (val != null) {
-          game.push(expandArg(String(val), vars));
-        }
+        if (Array.isArray(val)) for (const v of val) game.push(expandArg(String(v), vars));
+        else if (val != null) game.push(expandArg(String(val), vars));
       }
     }
   } else if (versionJson.minecraftArguments) {
@@ -418,7 +426,6 @@ function buildJvmAndGameArgs(
       if (tok) game.push(expandArg(tok, vars));
     }
   }
-
   return { jvm, game };
 }
 
@@ -427,11 +434,10 @@ function findOfficialLauncher(): string | null {
   const home = process.env.USERPROFILE || '';
   const localApp = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
   const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
-  const candidates = [
+  for (const c of [
     path.join(programFiles, 'Minecraft Launcher', 'MinecraftLauncher.exe'),
     path.join(localApp, 'Programs', 'Minecraft Launcher', 'MinecraftLauncher.exe'),
-  ];
-  for (const c of candidates) {
+  ]) {
     if (fs.existsSync(c)) return c;
   }
   return null;
@@ -441,9 +447,7 @@ function ensureLauncherProfile(mcDir: string, versionId: string, profileName: st
   const profilesPath = path.join(mcDir, 'launcher_profiles.json');
   let data: any = { profiles: {}, settings: {}, version: 3 };
   try {
-    if (fs.existsSync(profilesPath)) {
-      data = JSON.parse(fs.readFileSync(profilesPath, 'utf8'));
-    }
+    if (fs.existsSync(profilesPath)) data = JSON.parse(fs.readFileSync(profilesPath, 'utf8'));
   } catch {
     /* */
   }
@@ -472,9 +476,7 @@ export async function launchGame(): Promise<{
   pid?: number;
   needsSetup?: boolean;
 }> {
-  if (isRunning()) {
-    return { ok: false, message: 'Minecraft is already running from TT Launcher.' };
-  }
+  if (isRunning()) return { ok: false, message: 'Minecraft is already running from TT Launcher.' };
 
   report(2, 'start', 'Launch requested…');
 
@@ -496,9 +498,7 @@ export async function launchGame(): Promise<{
 
   report(18, 'install', `Installing TT Client for ${loader} ${mcVersion}…`);
   const installed = installTarget(loader, mcVersion);
-  if (!installed.ok) {
-    return { ok: false, message: installed.message, needsSetup: true };
-  }
+  if (!installed.ok) return { ok: false, message: installed.message, needsSetup: true };
 
   const mcDir = getDefaultMinecraftDir();
   const jarPath = installed.jarPath || null;
@@ -519,9 +519,7 @@ export async function launchGame(): Promise<{
   if (!java) {
     return {
       ok: false,
-      message:
-        'Java not found.\n\nInstall Temurin JDK 21+ from https://adoptium.net/\n' +
-        'or open the official Minecraft Launcher once.',
+      message: 'Java not found. Install Temurin JDK 21+ or open the official Minecraft Launcher once.',
       needsSetup: true,
     };
   }
@@ -530,13 +528,10 @@ export async function launchGame(): Promise<{
   report(55, 'loader', `Finding ${loader} profile for ${mcVersion}…`);
   const found = findLoaderVersion(mcDir, loader, mcVersion);
   if (!found) {
-    const loaderLabel = loader === 'fabric' ? 'Fabric' : 'NeoForge';
     return {
       ok: false,
       message:
-        `No ${loaderLabel} install found for Minecraft ${mcVersion} in:\n${path.join(mcDir, 'versions')}\n\n` +
-        `Install ${loaderLabel} for ${mcVersion} once, then Launch again.\n\n` +
-        (loader === 'neoforge' ? 'NeoForge: https://neoforged.net/\n' : 'Fabric: https://fabricmc.net/use/installer/\n'),
+        `No ${loader} install found for Minecraft ${mcVersion}.\nInstall NeoForge/Fabric once, then Launch again.`,
       needsSetup: true,
     };
   }
@@ -552,7 +547,6 @@ export async function launchGame(): Promise<{
 
   report(70, 'libs', `Building classpath (${versionId})…`);
   const jars = collectLibraries(versionJson, mcDir);
-
   const clientJarCandidates = [
     path.join(versionDir, `${versionId}.jar`),
     versionJson.inheritsFrom
@@ -570,8 +564,7 @@ export async function launchGame(): Promise<{
   if (jars.length < 5) {
     return {
       ok: false,
-      message:
-        `Minecraft libraries incomplete (${jars.length} jars).\nRun the ${loader} installer once, then Launch again.\nVersion: ${versionId}`,
+      message: `Libraries incomplete (${jars.length} jars). Run the ${loader} installer once.`,
       needsSetup: true,
     };
   }
@@ -595,7 +588,7 @@ export async function launchGame(): Promise<{
     libraries_directory: path.join(mcDir, 'libraries'),
     natives_directory: nativesDir,
     launcher_name: 'TT-Launcher',
-    launcher_version: '1.7.3',
+    launcher_version: '1.7.4',
     version_name: versionId,
     version_type: 'release',
     game_directory: mcDir,
@@ -634,19 +627,22 @@ export async function launchGame(): Promise<{
     ];
   }
 
-  const cleanJvm = jvm.filter((a) => a != null && String(a).length > 0);
+  let cleanJvm = jvm.filter((a) => a != null && String(a).length > 0);
   const cleanGame = game.filter((a) => a != null && String(a).length > 0);
+
+  const javaMajor = probeJavaVersion(java);
+  report(82, 'java', `Detected Java ${javaMajor} — filtering JVM flags`);
+  cleanJvm = filterJvmArgs(cleanJvm, javaMajor);
+
   const args = [...cleanJvm, '-cp', classpath, mainClass, ...cleanGame];
 
   report(88, 'spawn', `Starting ${mainClass} (${jars.length} libs)…`);
-  log.info('Direct spawn', {
-    java, mainClass, versionId, loader, mcVersion, gameDir: mcDir, libs: jars.length,
-  });
+  log.info('Direct spawn', { java, mainClass, versionId, loader, libs: jars.length });
 
   try {
     fs.writeFileSync(
       path.join(mcDir, 'tt-last-launch.txt'),
-      [`java=${java}`, `mainClass=${mainClass}`, `version=${versionId}`, '', ...args].join('\n'),
+      [`java=${java}`, `mainClass=${mainClass}`, `version=${versionId}`, `javaMajor=${javaMajor}`, '', ...args].join('\n'),
       'utf8',
     );
   } catch {
@@ -663,11 +659,7 @@ export async function launchGame(): Promise<{
       windowsHide: false,
     });
   } catch (e: any) {
-    return {
-      ok: false,
-      message: `Could not start Java:\n${e?.message || e}`,
-      needsSetup: true,
-    };
+    return { ok: false, message: `Could not start Java:\n${e?.message || e}`, needsSetup: true };
   }
 
   running = child;
@@ -707,11 +699,7 @@ export async function launchGame(): Promise<{
 
   if (spawnError) {
     running = null;
-    return {
-      ok: false,
-      message: `Java failed to start (${spawnError}). Install JDK 21+ or open Minecraft Launcher once.`,
-      needsSetup: true,
-    };
+    return { ok: false, message: `Java failed to start (${spawnError}).`, needsSetup: true };
   }
 
   const earlyExit = await new Promise<{ code: number | null } | null>((resolve) => {
@@ -730,10 +718,20 @@ export async function launchGame(): Promise<{
     });
   });
 
-  if (earlyExit) {
+  const fatalJvm =
+    /Could not create the Java Virtual Machine/i.test(earlyLog) ||
+    /Unrecognized option:/i.test(earlyLog) ||
+    /Error: A fatal exception has occurred/i.test(earlyLog);
+
+  if (earlyExit || fatalJvm) {
     running = null;
+    try {
+      child.kill();
+    } catch {
+      /* */
+    }
     const snippet = earlyLog.trim().slice(-1500) || '(no output)';
-    log.error('Minecraft exited immediately', { code: earlyExit.code, snippet });
+    log.error('Minecraft failed to start', { code: earlyExit?.code, fatalJvm, snippet });
 
     report(95, 'fallback', 'Direct launch failed — opening official Minecraft Launcher…');
     ensureLauncherProfile(mcDir, versionId, 'TT Client');
@@ -745,7 +743,7 @@ export async function launchGame(): Promise<{
         return {
           ok: true,
           message:
-            `Direct launch failed (exit ${earlyExit.code}). Opened the official Minecraft Launcher.\n` +
+            `Direct launch failed. Opened official Minecraft Launcher.\n` +
             `Select profile "TT Client" (${versionId}) and press Play.\n\nLog:\n${snippet}`,
         };
       } catch {
@@ -755,11 +753,7 @@ export async function launchGame(): Promise<{
 
     return {
       ok: false,
-      message:
-        `Minecraft exited immediately (code ${earlyExit.code}).\n\n` +
-        `1. Install ${loader === 'fabric' ? 'Fabric' : 'NeoForge'} for ${mcVersion}\n` +
-        `2. Launch that version once from the normal Minecraft Launcher\n` +
-        `3. Then Launch again from TT Launcher\n\nLog:\n${snippet}`,
+      message: `Minecraft failed to start.\n\nLog:\n${snippet}`,
       needsSetup: true,
     };
   }
@@ -774,7 +768,7 @@ export async function launchGame(): Promise<{
   report(100, 'done', `Game running (pid ${child.pid}). Window should appear shortly…`);
   return {
     ok: true,
-    message: `Launching ${loader} ${versionId} (MC ${mcVersion})…\nPID ${child.pid}\nMods: ${path.join(mcDir, 'mods')}`,
+    message: `Launching ${loader} ${versionId}…\nPID ${child.pid}`,
     pid: child.pid,
   };
 }
@@ -792,19 +786,13 @@ export function stopGame(): void {
 
 export function killAllMinecraftProcesses(): { ok: boolean; message: string; killed: string[] } {
   const killed: string[] = [];
-  const isWin = process.platform === 'win32';
   stopGame();
   killed.push('tt-launcher-child');
-  const winNames = [
-    'javaw.exe', 'java.exe', 'Minecraft.exe', 'MinecraftLauncher.exe',
-    'Minecraft.Windows.exe', 'MinecraftLauncherUpdater.exe',
-  ];
-  if (isWin) {
-    for (const name of winNames) {
+  if (process.platform === 'win32') {
+    for (const name of ['javaw.exe', 'java.exe', 'Minecraft.exe', 'MinecraftLauncher.exe']) {
       try {
         execSync(`taskkill /F /IM ${name} /T`, {
-          encoding: 'utf8', timeout: 8000, windowsHide: true,
-          stdio: ['ignore', 'pipe', 'pipe'],
+          encoding: 'utf8', timeout: 8000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
         });
         killed.push(name);
       } catch {
@@ -814,7 +802,7 @@ export function killAllMinecraftProcesses(): { ok: boolean; message: string; kil
   }
   return {
     ok: true,
-    message: `Ended Minecraft / launcher processes.\nKilled: ${killed.join(', ') || 'none'}`,
+    message: `Ended processes: ${killed.join(', ')}`,
     killed,
   };
 }
