@@ -1,7 +1,7 @@
 {
   "name": "tt-launcher",
-  "version": "1.7.2",
-  "description": "TT Launcher — NeoForge TT Client for MC 1.21.1–26.2 + resource pack",
+  "version": "1.7.3",
+  "description": "TT Launcher — NeoForge/Fabric TT Client launcher",
   "main": "dist-electron/main/main.js",
   "author": "The_Algorithm67 <ben757119@gmail.com>",
   "license": "MIT",
