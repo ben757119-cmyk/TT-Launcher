@@ -25,31 +25,31 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Bundle TT Client jars
+      - name: Bundle TT Client for all versions
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path resources/bundled/variants/neoforge/26.2 | Out-Null
-          New-Item -ItemType Directory -Force -Path resources/bundled/variants/neoforge/26.1 | Out-Null
-          New-Item -ItemType Directory -Force -Path resources/bundled/variants/neoforge/26.0 | Out-Null
+          New-Item -ItemType Directory -Force -Path resources/bundled | Out-Null
+          $versions = @('26.2','26.1','26.0','1.21.11','1.21.10','1.21.9','1.21.8','1.21.7','1.21.6','1.21.5','1.21.4','1.21.3','1.21.2','1.21.1')
           $jarUrl = "https://github.com/ben757119-cmyk/TT-Client/releases/download/v1.32.0/ttclient-1.32.0.jar"
           Invoke-WebRequest -Uri $jarUrl -OutFile resources/bundled/ttclient.jar
-          Copy-Item resources/bundled/ttclient.jar resources/bundled/variants/neoforge/26.2/ttclient.jar -Force
-          Copy-Item resources/bundled/ttclient.jar resources/bundled/variants/neoforge/26.1/ttclient.jar -Force
-          Copy-Item resources/bundled/ttclient.jar resources/bundled/variants/neoforge/26.0/ttclient.jar -Force
+          $builds = @()
+          foreach ($mc in $versions) {
+            $dir = "resources/bundled/variants/neoforge/$mc"
+            New-Item -ItemType Directory -Force -Path $dir | Out-Null
+            Copy-Item resources/bundled/ttclient.jar "$dir/ttclient.jar" -Force
+            $status = if ($mc -eq '26.2') { 'supported' } elseif ($mc -match '^26') { 'experimental' } else { 'best-effort' }
+            $note = if ($mc -eq '26.2') { $null } else { 'TT Client 1.32.0 built for NeoForge 26.2 — closest binary for this MC version. Install matching NeoForge.' }
+            $builds += @{ loader = 'neoforge'; minecraft = $mc; jar = "variants/neoforge/$mc/ttclient.jar"; status = $status; note = $note }
+          }
           $manifest = @{
-            ttClientVersion = "1.32.0"
-            resourcePack = "TT-Client-ResourcePack.zip"
-            builds = @(
-              @{ loader = "neoforge"; minecraft = "26.2"; jar = "variants/neoforge/26.2/ttclient.jar"; status = "supported" }
-              @{ loader = "neoforge"; minecraft = "26.1"; jar = "variants/neoforge/26.1/ttclient.jar"; status = "experimental"; note = "Same 26.2 binary" }
-              @{ loader = "neoforge"; minecraft = "26.0"; jar = "variants/neoforge/26.0/ttclient.jar"; status = "experimental"; note = "Same 26.2 binary" }
-            )
+            ttClientVersion = '1.32.0'
+            resourcePack = 'TT-Client-ResourcePack.zip'
+            builds = $builds
             unsupported = @{
-              fabric = "Fabric TT Client is not published yet."
-              "1.21.x" = "TT Client 1.32.0 targets Minecraft 26.2 / NeoForge 26.2."
+              fabric = 'Full Fabric port is in progress (TT Client Lite). Use NeoForge for the complete client.'
             }
           }
-          $manifest | ConvertTo-Json -Depth 6 | Set-Content -Path resources/bundled/manifest.json -Encoding utf8
+          $manifest | ConvertTo-Json -Depth 8 | Set-Content resources/bundled/manifest.json -Encoding utf8
           Get-ChildItem -Recurse resources/bundled | Format-Table FullName, Length
 
       - name: Build renderer + electron
@@ -69,8 +69,6 @@ jobs:
           name: TT-Launcher-Windows
           path: |
             release/*.exe
-            release/*.yml
-            release/latest*.yml
           if-no-files-found: warn
           retention-days: 30
 

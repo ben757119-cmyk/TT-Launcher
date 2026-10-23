@@ -1,4 +1,4 @@
-export const LAUNCHER_VERSION = '1.6.0';
+export const LAUNCHER_VERSION = '1.7.0';
 
 export const TT_OWNER = {
   name: 'The_Algorithm67',
@@ -10,13 +10,7 @@ export const TT_OWNER = {
 export const TT_GITHUB = {
   owner: 'ben757119-cmyk',
   repo: 'TT-Client',
-  jarPatterns: [
-    /^ttclient[-_].*\.jar$/i,
-    /^TT[-_]?Client.*\.jar$/i,
-    /.*neoforge.*\.jar$/i,
-    /.*fabric.*\.jar$/i,
-    /.*\.jar$/i,
-  ],
+  jarPatterns: [/^ttclient[-_].*\.jar$/i, /^TT[-_]?Client.*\.jar$/i, /.*\.jar$/i],
 };
 
 export type TtLoader = 'neoforge' | 'fabric';
@@ -41,31 +35,19 @@ export const SUPPORTED_MC_VERSIONS: string[] = [
   '1.21.3',
   '1.21.2',
   '1.21.1',
-  '1.21',
 ];
 
-export const TT_COMPAT = {
-  minecraft: '26.2',
-  neoforge: '26.2',
-  javaMin: 21,
-};
-
+export const TT_COMPAT = { minecraft: '26.2', neoforge: '26.2', javaMin: 21 };
 export const TT_WEBSITE = 'https://tt-client-oogley.vercel.app';
 export const MS_CLIENT_ID = process.env.TT_MS_CLIENT_ID || '';
 export const MODRINTH_API = 'https://api.modrinth.com/v2';
-export const MODRINTH_USER_AGENT = 'TT-Launcher/1.6.0 (github.com/ben757119-cmyk/TT-Client)';
+export const MODRINTH_USER_AGENT = 'TT-Launcher/1.7.0';
 export const DEFAULT_MEMORY_MB = 4096;
 export const DEFAULT_WIDTH = 1280;
 export const DEFAULT_HEIGHT = 720;
-
-export const BUNDLED = {
-  ttJar: 'ttclient.jar',
-  ttPack: 'TT-Client-ResourcePack.zip',
-};
+export const BUNDLED = { ttJar: 'ttclient.jar', ttPack: 'TT-Client-ResourcePack.zip' };
 
 export function ttJarCandidates(loader: TtLoader): string[] {
-  if (loader === 'fabric') {
-    return ['ttclient-fabric.jar', 'ttclient-fabric-26.2.jar', 'ttclient.jar'];
-  }
-  return ['ttclient-neoforge.jar', 'ttclient.jar', 'ttclient-neoforge-26.2.jar'];
+  if (loader === 'fabric') return ['ttclient-fabric.jar', 'ttclient.jar'];
+  return ['ttclient-neoforge.jar', 'ttclient.jar'];
 }

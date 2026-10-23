@@ -1,7 +1,7 @@
 {
   "name": "tt-launcher",
-  "version": "1.6.0",
-  "description": "TT Launcher — installs matching TT Client + pack for NeoForge 26.x and launches it.",
+  "version": "1.7.0",
+  "description": "TT Launcher — NeoForge TT Client for MC 1.21.1–26.2 + resource pack",
   "main": "dist-electron/main/main.js",
   "author": "The_Algorithm67 <ben757119@gmail.com>",
   "license": "MIT",
