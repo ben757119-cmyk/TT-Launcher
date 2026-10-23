@@ -1,6 +1,6 @@
 {
   "name": "tt-launcher",
-  "version": "1.7.4",
+  "version": "1.7.5",
   "description": "TT Launcher — NeoForge/Fabric TT Client launcher",
   "main": "dist-electron/main/main.js",
   "author": "The_Algorithm67 <ben757119@gmail.com>",
