@@ -1,4 +1,4 @@
-export const LAUNCHER_VERSION = '1.7.0';
+export const LAUNCHER_VERSION = '1.7.1';
 
 export const TT_OWNER = {
   name: 'The_Algorithm67',
@@ -41,7 +41,7 @@ export const TT_COMPAT = { minecraft: '26.2', neoforge: '26.2', javaMin: 21 };
 export const TT_WEBSITE = 'https://tt-client-oogley.vercel.app';
 export const MS_CLIENT_ID = process.env.TT_MS_CLIENT_ID || '';
 export const MODRINTH_API = 'https://api.modrinth.com/v2';
-export const MODRINTH_USER_AGENT = 'TT-Launcher/1.7.0';
+export const MODRINTH_USER_AGENT = 'TT-Launcher/1.7.1';
 export const DEFAULT_MEMORY_MB = 4096;
 export const DEFAULT_WIDTH = 1280;
 export const DEFAULT_HEIGHT = 720;
