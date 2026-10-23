@@ -2,26 +2,43 @@ import { useEffect, useState } from 'react';
 
 type Props = { instance: any; toast: (s: string) => void };
 
+const GAME = '26.2';
+const LOADER = 'neoforge';
+
 export default function Mods({ instance, toast }: Props) {
-  const [query, setQuery] = useState('neoforge');
+  const [query, setQuery] = useState('');
   const [hits, setHits] = useState<any[]>([]);
+  const [installed, setInstalled] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const gameVersion = instance?.minecraftVersion || '26.2';
+
+  const loadInstalled = async () => {
+    try {
+      if ((window as any).tt.listMods) {
+        setInstalled(await (window as any).tt.listMods());
+      }
+    } catch {
+      setInstalled([]);
+    }
+  };
 
   const search = async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await window.tt.modrinthSearch({
-        query,
+        query: query || undefined,
         projectType: 'mod',
-        versions: [gameVersion, '1.21.1'],
-        loaders: ['neoforge'],
-        limit: 24,
+        versions: [GAME],
+        loaders: [LOADER],
+        limit: 30,
         index: 'downloads',
       });
-      setHits(res.hits || []);
+      const filtered = (res.hits || []).filter((h: any) => {
+        const cats = (h.categories || []).map((c: string) => c.toLowerCase());
+        return cats.includes('neoforge') || cats.includes('modloader-neoforge');
+      });
+      setHits(filtered);
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -31,25 +48,24 @@ export default function Mods({ instance, toast }: Props) {
 
   useEffect(() => {
     search();
+    loadInstalled();
   }, []);
 
   const install = async (projectId: string) => {
     try {
-      // Reuse pack installer path is wrong for mods — download via versions into mods/
       const versions = await window.tt.modrinthVersions(projectId, {
-        loaders: ['neoforge'],
-        gameVersions: [gameVersion],
+        loaders: [LOADER],
+        gameVersions: [GAME],
       });
       if (!versions?.length) {
-        setError('No NeoForge-compatible version for this Minecraft version.');
+        setError('No NeoForge 26.2 build for this mod — hidden from install.');
         return;
       }
-      // Install as "pack" path is incorrect; open external for now if no mod install API
-      // Dedicated mod install: write to instance mods via main — extend packs or add mods service.
-      // Minimal: open Modrinth page
       const project = await window.tt.modrinthProject(projectId);
-      await window.tt.openExternal(`https://modrinth.com/mod/${project.slug}`);
-      toast('Opened Modrinth page — full in-app mod install uses NeoForge filter; download from site or extend installer.');
+      await window.tt.openExternal(
+        `https://modrinth.com/mod/${project.slug}/version/${versions[0].id}`,
+      );
+      toast('Opened compatible NeoForge 26.2 version on Modrinth');
     } catch (e: any) {
       setError(e?.message || String(e));
     }
@@ -57,10 +73,33 @@ export default function Mods({ instance, toast }: Props) {
 
   return (
     <div>
-      <h1 className="page-title">Mods & Add-ons</h1>
+      <h1 className="page-title">Mods</h1>
       <p className="page-sub">
-        Modrinth search filtered to <strong>NeoForge</strong> for {gameVersion}. Fabric-only mods are excluded.
+        Only <strong>NeoForge {GAME}</strong> mods are listed. Everything else is hidden.
       </p>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="card-title">Installed in .minecraft/mods</div>
+        {installed.length === 0 ? (
+          <div className="empty">No jars found yet — install TT Client from Play.</div>
+        ) : (
+          <div className="list">
+            {installed.map((m) => (
+              <div key={m.path} className="list-item">
+                <div className="meta">
+                  <strong>{m.name}</strong>
+                  <span>
+                    {(m.size / 1024).toFixed(0)} KB · {m.enabled ? 'enabled' : 'disabled'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <button className="btn btn-ghost" style={{ marginTop: 8 }} onClick={loadInstalled}>
+          Refresh
+        </button>
+      </div>
 
       <div className="row" style={{ marginBottom: 16 }}>
         <input
@@ -74,16 +113,10 @@ export default function Mods({ instance, toast }: Props) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && search()}
-          placeholder="Search NeoForge mods…"
+          placeholder="Search NeoForge 26.2 mods…"
         />
         <button className="btn btn-primary" disabled={loading} onClick={search}>
           Search
-        </button>
-        <button
-          className="btn btn-ghost"
-          onClick={() => instance && window.tt.openInstanceFolder(instance.id)}
-        >
-          Open mods folder
         </button>
       </div>
 
@@ -95,15 +128,14 @@ export default function Mods({ instance, toast }: Props) {
             {h.icon_url ? <img src={h.icon_url} alt="" /> : <div style={{ width: 48, height: 48 }} />}
             <div className="meta">
               <strong>{h.title}</strong>
-              <span>
-                {h.downloads?.toLocaleString?.()} downloads · {h.categories?.slice(0, 3).join(', ')}
-              </span>
+              <span>{h.description?.slice(0, 120)}</span>
             </div>
-            <button className="btn btn-ghost" onClick={() => install(h.project_id)}>
-              View / Install
+            <button className="btn btn-teal" onClick={() => install(h.project_id)}>
+              Get
             </button>
           </div>
         ))}
+        {!loading && !hits.length && <div className="empty">No NeoForge {GAME} mods matched.</div>}
       </div>
     </div>
   );
