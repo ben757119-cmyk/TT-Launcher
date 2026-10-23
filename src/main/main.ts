@@ -1,6 +1,13 @@
 import { app, BrowserWindow, ipcMain, shell, dialog } from 'electron';
 import path from 'path';
-import { LAUNCHER_VERSION, TT_COMPAT, TT_WEBSITE, TT_OWNER } from './config';
+import {
+  LAUNCHER_VERSION,
+  TT_COMPAT,
+  TT_WEBSITE,
+  TT_OWNER,
+  SUPPORTED_MC_VERSIONS,
+  SUPPORTED_LOADERS,
+} from './config';
 import { getStore } from './store';
 import { log } from './logger';
 import * as auth from './auth';
@@ -87,6 +94,8 @@ ipcMain.handle('app:getMeta', async () => ({
   ttCompat: TT_COMPAT,
   website: TT_WEBSITE,
   owner: TT_OWNER,
+  supportedVersions: SUPPORTED_MC_VERSIONS,
+  supportedLoaders: SUPPORTED_LOADERS,
   minecraftDir: vanilla.getDefaultMinecraftDir(),
   logPath: log.path(),
   platform: process.platform,
@@ -192,6 +201,13 @@ ipcMain.handle('modrinth:versions', async (_e, id, opts) => modrinth.getVersions
 ipcMain.handle('vanilla:setup', async () => vanilla.setupVanillaIntegration());
 ipcMain.handle('vanilla:importAccount', async () => vanilla.importOfficialLauncherAccount());
 ipcMain.handle('vanilla:mcDir', async () => vanilla.getDefaultMinecraftDir());
+
+ipcMain.handle('mods:list', async () => {
+  if (typeof (ttInstall as any).listInstalledMods === 'function') {
+    return (ttInstall as any).listInstalledMods();
+  }
+  return [];
+});
 
 ipcMain.handle('launch:play', async () => launch.launchGame());
 ipcMain.handle('launch:stop', async () => {
