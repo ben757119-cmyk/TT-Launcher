@@ -2,7 +2,7 @@
  * Direct launch — installs matching TT Client + pack, then spawns loader profile.
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, ChildProcess, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { getDefaultInstance, updateInstance, ensureTtInstance } from './instances';
@@ -28,22 +28,116 @@ export function getRunningPid(): number | null {
 
 function findJava(configured?: string): string | null {
   if (configured && fs.existsSync(configured)) return configured;
-  const candidates =
-    process.platform === 'win32'
-      ? [
-          process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin', 'java.exe') : '',
-          'C:\\Program Files\\Java\\jdk-21\\bin\\java.exe',
-          'C:\\Program Files\\Eclipse Adoptium\\jdk-21\\bin\\java.exe',
-          'C:\\Program Files\\Microsoft\\jdk-21\\bin\\java.exe',
-          'java',
-        ]
-      : [process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin', 'java') : '', 'java'];
-  for (const c of candidates) {
-    if (!c) continue;
-    if (c === 'java' || c === 'java.exe') return c;
-    if (fs.existsSync(c)) return c;
+
+  const isWin = process.platform === 'win32';
+  const javaName = isWin ? 'java.exe' : 'java';
+  const home = process.env.USERPROFILE || process.env.HOME || '';
+  const localApp = process.env.LOCALAPPDATA || (home ? path.join(home, 'AppData', 'Local') : '');
+  const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
+  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+
+  const candidates: string[] = [];
+
+  if (process.env.JAVA_HOME) {
+    candidates.push(path.join(process.env.JAVA_HOME, 'bin', javaName));
   }
-  return 'java';
+
+  // Minecraft Launcher bundled runtimes
+  if (isWin && localApp) {
+    const mcJavaRoots = [
+      path.join(localApp, 'Packages', 'Microsoft.4297127D64EC6_8wekyb3d8bbwe', 'LocalCache', 'Local', 'runtime'),
+      path.join(home, '.minecraft', 'runtime'),
+      path.join(localApp, 'MinecraftLauncher', 'runtime'),
+      path.join(programFiles, 'Minecraft Launcher', 'runtime'),
+      path.join(localApp, 'TLauncher', 'runtime'),
+    ];
+    for (const root of mcJavaRoots) {
+      if (!fs.existsSync(root)) continue;
+      try {
+        const stack = [root];
+        let seen = 0;
+        while (stack.length && seen < 250) {
+          const dir = stack.pop()!;
+          seen++;
+          let entries: fs.Dirent[];
+          try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+          } catch {
+            continue;
+          }
+          for (const e of entries) {
+            const full = path.join(dir, e.name);
+            if (e.isFile() && e.name.toLowerCase() === javaName) {
+              candidates.push(full);
+            } else if (e.isDirectory() && !e.name.startsWith('.')) {
+              stack.push(full);
+            }
+          }
+        }
+      } catch {
+        /* */
+      }
+    }
+  }
+
+  if (isWin) {
+    const winRoots = [programFiles, programFilesX86];
+    const vendors = [
+      'Eclipse Adoptium',
+      'Java',
+      'Microsoft',
+      'Amazon Corretto',
+      'Zulu',
+      'BellSoft',
+      'Temurin',
+      'AdoptOpenJDK',
+    ];
+    for (const root of winRoots) {
+      for (const vendor of vendors) {
+        const vendorDir = path.join(root, vendor);
+        if (!fs.existsSync(vendorDir)) continue;
+        try {
+          for (const name of fs.readdirSync(vendorDir)) {
+            const bin = path.join(vendorDir, name, 'bin', javaName);
+            if (fs.existsSync(bin)) candidates.push(bin);
+          }
+        } catch {
+          /* */
+        }
+      }
+    }
+  } else {
+    candidates.push('/usr/bin/java', '/usr/lib/jvm/default-java/bin/java');
+  }
+
+  const seen = new Set<string>();
+  for (const c of candidates) {
+    if (!c || seen.has(c)) continue;
+    seen.add(c);
+    try {
+      if (fs.existsSync(c)) {
+        log.info('Found Java', { path: c });
+        return c;
+      }
+    } catch {
+      /* */
+    }
+  }
+
+  try {
+    const cmd = isWin ? 'where java' : 'which java';
+    const out = execSync(cmd, { encoding: 'utf8', timeout: 3000, windowsHide: true })
+      .trim()
+      .split(/\r?\n/)[0];
+    if (out && fs.existsSync(out)) {
+      log.info('Found Java on PATH', { path: out });
+      return out;
+    }
+  } catch {
+    /* not on PATH */
+  }
+
+  return null;
 }
 
 function findLoaderVersion(
@@ -166,7 +260,10 @@ export async function launchGame(): Promise<{
   if (!java) {
     return {
       ok: false,
-      message: 'Java not found. Install Temurin/Oracle JDK 21+ and set the path in Settings.',
+      message:
+        'Java not found.\n\nInstall Temurin JDK 21+ from https://adoptium.net/\n' +
+        'or open the official Minecraft Launcher once (it installs a Java runtime).\n\n' +
+        'You can also set a Java path in Settings.',
       needsSetup: true,
     };
   }
@@ -238,14 +335,75 @@ export async function launchGame(): Promise<{
     'TT-Launcher',
   ];
 
-  log.info('Direct spawn', { java, mainClass, versionId, loader, mcVersion, gameDir: mcDir, libs: jars.length });
-  const child = spawn(java, args, {
-    cwd: mcDir,
-    env: { ...process.env },
-    detached: false,
-    stdio: ['ignore', 'pipe', 'pipe'],
+  log.info('Direct spawn', {
+    java,
+    mainClass,
+    versionId,
+    loader,
+    mcVersion,
+    gameDir: mcDir,
+    libs: jars.length,
   });
+
+  let child: ChildProcess;
+  try {
+    child = spawn(java, args, {
+      cwd: mcDir,
+      env: { ...process.env },
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (e: any) {
+    const msg = e?.message || String(e);
+    log.error('spawn failed', { msg, java });
+    return {
+      ok: false,
+      message:
+        `Could not start Java:\n${msg}\n\n` +
+        `Install Temurin JDK 21+ from https://adoptium.net/\n` +
+        `or open the official Minecraft Launcher once.`,
+      needsSetup: true,
+    };
+  }
+
   running = child;
+
+  const spawnError = await new Promise<string | null>((resolve) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(null);
+      }
+    }, 1500);
+    child.once('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(err?.message || String(err));
+    });
+    child.once('spawn', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
+
+  if (spawnError) {
+    running = null;
+    log.error('Java process error', { spawnError, java });
+    return {
+      ok: false,
+      message:
+        `Java failed to start (${spawnError}).\n\n` +
+        `Install Temurin JDK 21+ from https://adoptium.net/\n` +
+        `or open the official Minecraft Launcher once so its Java runtime is installed.\n\n` +
+        `You can also set a Java path in Settings.`,
+      needsSetup: true,
+    };
+  }
+
   child.stdout?.on('data', (d) => log.debug('[mc] ' + d.toString().slice(0, 400)));
   child.stderr?.on('data', (d) => log.warn('[mc-err] ' + d.toString().slice(0, 400)));
   child.on('exit', (code) => {
