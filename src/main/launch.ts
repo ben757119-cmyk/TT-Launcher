@@ -1,5 +1,5 @@
 /**
- * Direct launch — loader + Minecraft version chosen on the Home screen.
+ * Direct launch — installs matching TT Client + pack, then spawns loader profile.
  */
 
 import { spawn, ChildProcess } from 'child_process';
@@ -9,14 +9,12 @@ import { getDefaultInstance, updateInstance, ensureTtInstance } from './instance
 import { getActiveAccount, getLaunchIdentity } from './auth';
 import { getStore } from './store';
 import { log } from './logger';
-import { TT_COMPAT, TtLoader, ttJarCandidates } from './config';
+import { TT_COMPAT, TtLoader } from './config';
 import {
   getDefaultMinecraftDir,
-  installBundledTtIntoMinecraft,
-  installBundledPackIntoMinecraft,
   importOfficialLauncherAccount,
-  ensureMinecraftLayout,
 } from './vanilla-mc';
+import { installTarget } from './target-install';
 
 let running: ChildProcess | null = null;
 
@@ -46,44 +44,6 @@ function findJava(configured?: string): string | null {
     if (fs.existsSync(c)) return c;
   }
   return 'java';
-}
-
-function resolveTtJar(mcDir: string, loader: TtLoader): string | null {
-  const mods = path.join(mcDir, 'mods');
-  if (!fs.existsSync(mods)) return null;
-  for (const name of ttJarCandidates(loader)) {
-    const p = path.join(mods, name);
-    if (fs.existsSync(p)) return p;
-  }
-  try {
-    for (const f of fs.readdirSync(mods)) {
-      if (/^ttclient.*\.jar$/i.test(f) && !f.endsWith('.disabled')) return path.join(mods, f);
-    }
-  } catch { /* */ }
-  return null;
-}
-
-function prepareModsAndPack(loader: TtLoader): { mcDir: string; jarPath: string | null } {
-  const mcDir = getDefaultMinecraftDir();
-  ensureMinecraftLayout(mcDir);
-  let jarPath = resolveTtJar(mcDir, loader);
-  if (!jarPath) {
-    const bundled = installBundledTtIntoMinecraft(mcDir);
-    jarPath = bundled?.jarPath || resolveTtJar(mcDir, loader);
-  }
-  installBundledPackIntoMinecraft(mcDir);
-  const inst = getDefaultInstance();
-  if (inst?.ttClientJar && fs.existsSync(inst.ttClientJar)) {
-    const src = inst.ttClientJar.replace(/\.disabled$/, '');
-    if (fs.existsSync(src)) {
-      const dest = path.join(mcDir, 'mods', ttJarCandidates(loader)[0] || 'ttclient.jar');
-      try {
-        fs.copyFileSync(src, dest);
-        jarPath = dest;
-      } catch { /* */ }
-    }
-  }
-  return { mcDir, jarPath };
 }
 
 function findLoaderVersion(
@@ -184,13 +144,19 @@ export async function launchGame(): Promise<{
     };
   }
 
-  const { mcDir, jarPath } = prepareModsAndPack(loader);
+  const installed = installTarget(loader, mcVersion);
+  if (!installed.ok) {
+    return { ok: false, message: installed.message, needsSetup: true };
+  }
+
+  const mcDir = getDefaultMinecraftDir();
+  const jarPath = installed.jarPath || null;
   let instance = getDefaultInstance() || ensureTtInstance();
   if (jarPath) {
     instance =
       updateInstance(instance.id, {
         ttClientJar: jarPath,
-        ttClientVersion: instance.ttClientVersion || 'installed',
+        ttClientVersion: `${loader}-${mcVersion}`,
         gameDir: mcDir,
         minecraftVersion: mcVersion,
       }) || instance;
@@ -217,7 +183,8 @@ export async function launchGame(): Promise<{
         (loader === 'neoforge'
           ? 'NeoForge: https://neoforged.net/\n'
           : 'Fabric: https://fabricmc.net/use/installer/\n') +
-        `Mods folder: ${path.join(mcDir, 'mods')}`,
+        `TT was installed to:\n${path.join(mcDir, 'mods')}\n` +
+        (installed.message || ''),
       needsSetup: true,
     };
   }
@@ -288,14 +255,21 @@ export async function launchGame(): Promise<{
   updateInstance(instance.id, { lastPlayed: Date.now() });
   return {
     ok: true,
-    message: `Launching ${loader} ${versionId} (MC ${mcVersion})…\nMods: ${path.join(mcDir, 'mods')}`,
+    message:
+      `Launching ${loader} ${versionId} (MC ${mcVersion})…\n` +
+      (installed.message || '') +
+      `\nMods: ${path.join(mcDir, 'mods')}`,
     pid: child.pid,
   };
 }
 
 export function stopGame(): void {
   if (running && !running.killed) {
-    try { running.kill(); } catch { /* */ }
+    try {
+      running.kill();
+    } catch {
+      /* */
+    }
     running = null;
   }
 }
