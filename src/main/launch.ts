@@ -1,5 +1,5 @@
 /**
- * Direct launch — installs matching TT Client + pack, then spawns loader profile.
+ * Direct launch — TT Client install + progress events + process kill.
  */
 
 import { spawn, ChildProcess, execSync } from 'child_process';
@@ -17,6 +17,27 @@ import {
 import { installTarget } from './target-install';
 
 let running: ChildProcess | null = null;
+
+export type LaunchProgress = { pct: number; step: string; log: string };
+
+let progressCb: ((p: LaunchProgress) => void) | null = null;
+
+export function setLaunchProgressCallback(cb: ((p: LaunchProgress) => void) | null) {
+  progressCb = cb;
+}
+
+function report(pct: number, step: string, line: string) {
+  try {
+    progressCb?.({ pct, step, log: line });
+  } catch {
+    /* */
+  }
+  try {
+    log.info(`[launch] ${step}: ${line}`);
+  } catch {
+    /* */
+  }
+}
 
 export function isRunning(): boolean {
   return !!(running && !running.killed);
@@ -42,7 +63,6 @@ function findJava(configured?: string): string | null {
     candidates.push(path.join(process.env.JAVA_HOME, 'bin', javaName));
   }
 
-  // Minecraft Launcher bundled runtimes
   if (isWin && localApp) {
     const mcJavaRoots = [
       path.join(localApp, 'Packages', 'Microsoft.4297127D64EC6_8wekyb3d8bbwe', 'LocalCache', 'Local', 'runtime'),
@@ -221,12 +241,17 @@ export async function launchGame(): Promise<{
   pid?: number;
   needsSetup?: boolean;
 }> {
-  if (isRunning()) return { ok: false, message: 'Minecraft is already running from TT Launcher.' };
+  if (isRunning()) {
+    return { ok: false, message: 'Minecraft is already running from TT Launcher.' };
+  }
+
+  report(2, 'start', 'Launch requested…');
 
   const settings = getStore().get('settings') as any;
   const loader = (settings.selectedLoader === 'fabric' ? 'fabric' : 'neoforge') as TtLoader;
   const mcVersion = String(settings.selectedMinecraftVersion || TT_COMPAT.minecraft);
 
+  report(8, 'account', 'Resolving account…');
   let account = getActiveAccount();
   if (!account) account = importOfficialLauncherAccount();
   if (!account) {
@@ -238,6 +263,7 @@ export async function launchGame(): Promise<{
     };
   }
 
+  report(18, 'install', `Installing TT Client for ${loader} ${mcVersion}…`);
   const installed = installTarget(loader, mcVersion);
   if (!installed.ok) {
     return { ok: false, message: installed.message, needsSetup: true };
@@ -256,7 +282,9 @@ export async function launchGame(): Promise<{
       }) || instance;
   }
 
+  report(40, 'java', 'Looking for Java…');
   const java = findJava(instance.javaPath || settings.javaPath);
+  if (java) report(48, 'java', `Java: ${java}`);
   if (!java) {
     return {
       ok: false,
@@ -269,6 +297,7 @@ export async function launchGame(): Promise<{
   }
 
   const identity = getLaunchIdentity(account);
+  report(55, 'loader', `Finding ${loader} profile for ${mcVersion}…`);
   const found = findLoaderVersion(mcDir, loader, mcVersion);
   if (!found) {
     const loaderLabel = loader === 'fabric' ? 'Fabric' : 'NeoForge';
@@ -288,6 +317,7 @@ export async function launchGame(): Promise<{
 
   const { versionDir, versionId, versionJson } = found;
   const mainClass = defaultMainClass(loader, versionJson);
+  report(70, 'libs', `Building classpath (${versionId})…`);
   const jars = collectLibraries(versionJson, [mcDir]);
   const clientJar = path.join(versionDir, `${versionId}.jar`);
   if (fs.existsSync(clientJar)) jars.push(clientJar);
@@ -335,6 +365,7 @@ export async function launchGame(): Promise<{
     'TT-Launcher',
   ];
 
+  report(88, 'spawn', `Starting game process (${mainClass})…`);
   log.info('Direct spawn', {
     java,
     mainClass,
@@ -411,6 +442,7 @@ export async function launchGame(): Promise<{
     running = null;
   });
   updateInstance(instance.id, { lastPlayed: Date.now() });
+  report(100, 'done', `Game process started (pid ${child.pid}). Minecraft is loading…`);
   return {
     ok: true,
     message:
@@ -430,4 +462,63 @@ export function stopGame(): void {
     }
     running = null;
   }
+}
+
+/** Kill Minecraft game + Minecraft Launcher processes. */
+export function killAllMinecraftProcesses(): { ok: boolean; message: string; killed: string[] } {
+  const killed: string[] = [];
+  const isWin = process.platform === 'win32';
+
+  stopGame();
+  killed.push('tt-launcher-child');
+
+  const winNames = [
+    'javaw.exe',
+    'java.exe',
+    'Minecraft.exe',
+    'MinecraftLauncher.exe',
+    'Minecraft.Windows.exe',
+    'MinecraftLauncherUpdater.exe',
+    'MinecraftLauncherInstallHelper.exe',
+  ];
+
+  if (isWin) {
+    for (const name of winNames) {
+      try {
+        execSync(`taskkill /F /IM ${name} /T`, {
+          encoding: 'utf8',
+          timeout: 8000,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        killed.push(name);
+      } catch {
+        /* not running */
+      }
+    }
+    try {
+      execSync(
+        'powershell -NoProfile -Command "Get-Process | Where-Object { $_.ProcessName -match \'Minecraft|MinecraftLauncher|javaw\' } | Stop-Process -Force -ErrorAction SilentlyContinue"',
+        { encoding: 'utf8', timeout: 10000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
+      );
+      killed.push('powershell-mc-sweep');
+    } catch {
+      /* */
+    }
+  } else {
+    try {
+      execSync("pkill -f '[Mm]inecraft' || true", { encoding: 'utf8', timeout: 5000 });
+      execSync("pkill -f 'minecraft-launcher' || true", { encoding: 'utf8', timeout: 5000 });
+      killed.push('pkill-minecraft');
+    } catch {
+      /* */
+    }
+  }
+
+  log.info('killAllMinecraftProcesses', { killed });
+  return {
+    ok: true,
+    message: `Ended Minecraft / launcher processes.\nKilled targets: ${killed.join(', ') || 'none running'}`,
+    killed,
+  };
 }
