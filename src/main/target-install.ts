@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
 import { log } from './logger';
-import { BUNDLED, TtLoader } from './config';
+import { BUNDLED, TtLoader, SUPPORTED_MC_VERSIONS } from './config';
 import {
   getDefaultMinecraftDir,
   ensureMinecraftLayout,
@@ -13,7 +13,7 @@ export interface TargetBuild {
   loader: string;
   minecraft: string;
   jar: string;
-  status: 'supported' | 'experimental' | 'unavailable';
+  status: 'supported' | 'experimental' | 'best-effort' | 'unavailable';
   note?: string;
 }
 
@@ -27,7 +27,6 @@ export interface TargetManifest {
 function bundledRoots(): string[] {
   return [
     path.join(process.resourcesPath || '', 'bundled'),
-    path.join(process.resourcesPath || '', ''),
     path.join(__dirname, '..', '..', 'resources', 'bundled'),
     path.join(process.cwd(), 'resources', 'bundled'),
     path.join(app.getAppPath(), 'resources', 'bundled'),
@@ -58,41 +57,53 @@ function resolveBundledFile(relative: string): string | null {
 
 export function findTargetBuild(loader: TtLoader, mcVersion: string): TargetBuild | null {
   const man = loadManifest();
-  if (!man) {
-    if (loader === 'neoforge' && (mcVersion === '26.2' || !mcVersion)) {
-      return {
-        loader: 'neoforge',
-        minecraft: '26.2',
-        jar: BUNDLED.ttJar,
-        status: 'supported',
-      };
-    }
-    return null;
-  }
-  return (
-    man.builds.find(
+  if (man) {
+    const hit = man.builds.find(
       (b) => b.loader === loader && b.minecraft === mcVersion && b.status !== 'unavailable',
-    ) || null
-  );
+    );
+    if (hit) return hit;
+  }
+  const rel = `variants/${loader}/${mcVersion}/ttclient.jar`;
+  if (resolveBundledFile(rel)) {
+    return {
+      loader,
+      minecraft: mcVersion,
+      jar: rel,
+      status: loader === 'neoforge' && mcVersion === '26.2' ? 'supported' : 'best-effort',
+      note:
+        loader === 'neoforge' && mcVersion === '26.2'
+          ? undefined
+          : 'Closest available TT Client binary for this target',
+    };
+  }
+  if (loader === 'neoforge' && resolveBundledFile(BUNDLED.ttJar)) {
+    return { loader: 'neoforge', minecraft: mcVersion || '26.2', jar: BUNDLED.ttJar, status: 'supported' };
+  }
+  return null;
 }
 
 export function listAvailableTargets(): TargetBuild[] {
   const man = loadManifest();
-  return man?.builds?.filter((b) => b.status !== 'unavailable') || [];
+  if (man?.builds?.length) return man.builds.filter((b) => b.status !== 'unavailable');
+  const out: TargetBuild[] = [];
+  for (const loader of ['neoforge', 'fabric'] as TtLoader[]) {
+    for (const mc of SUPPORTED_MC_VERSIONS) {
+      const b = findTargetBuild(loader, mc);
+      if (b) out.push(b);
+    }
+  }
+  return out;
 }
 
 function disableOtherTtJars(modsDir: string, keepName: string) {
   if (!fs.existsSync(modsDir)) return;
   for (const f of fs.readdirSync(modsDir)) {
-    if (!/^ttclient.*\.jar(\.disabled)?$/i.test(f) && !/^tt[-_]?client.*\.jar(\.disabled)?$/i.test(f)) {
-      continue;
-    }
+    if (!/^ttclient.*\.jar(\.disabled)?$/i.test(f)) continue;
     const full = path.join(modsDir, f);
     if (f === keepName) {
       if (f.endsWith('.disabled')) {
-        const on = f.slice(0, -'.disabled'.length);
         try {
-          fs.renameSync(full, path.join(modsDir, on));
+          fs.renameSync(full, path.join(modsDir, f.slice(0, -'.disabled'.length)));
         } catch {
           /* */
         }
@@ -126,21 +137,11 @@ export function installTarget(
 
   const build = findTargetBuild(loader, mcVersion);
   if (!build) {
-    const man = loadManifest();
-    let hint = '';
-    if (loader === 'fabric') {
-      hint = man?.unsupported?.fabric || 'Fabric TT Client is not published yet.';
-    } else if (mcVersion.startsWith('1.21')) {
-      hint =
-        man?.unsupported?.['1.21.x'] ||
-        'TT Client is built for Minecraft 26.2 / NeoForge. 1.21.x needs a separate rebuild.';
-    } else {
-      hint = `No TT Client build for ${loader} + Minecraft ${mcVersion}.`;
-    }
     return {
       ok: false,
       message:
-        `${hint}\n\nAvailable builds:\n` +
+        `No TT Client build for ${loader} + Minecraft ${mcVersion}.\n\n` +
+        `Available:\n` +
         listAvailableTargets()
           .map((b) => `  • ${b.loader} ${b.minecraft} (${b.status})`)
           .join('\n'),
@@ -149,17 +150,13 @@ export function installTarget(
 
   const src = resolveBundledFile(build.jar) || resolveBundledFile(BUNDLED.ttJar);
   if (!src || !fs.existsSync(src)) {
-    return {
-      ok: false,
-      message: `Bundled jar missing for ${loader} ${mcVersion} (${build.jar}).`,
-    };
+    return { ok: false, message: `Bundled jar missing: ${build.jar}` };
   }
 
   const destName = `ttclient-${loader}-${mcVersion}.jar`;
   const dest = path.join(modsDir, destName);
   fs.copyFileSync(src, dest);
   disableOtherTtJars(modsDir, destName);
-
   try {
     fs.copyFileSync(src, path.join(modsDir, 'ttclient.jar'));
   } catch {
@@ -168,27 +165,10 @@ export function installTarget(
 
   const pack = installBundledPackIntoMinecraft(mcDir);
 
-  log.info('Installed target TT Client', {
-    loader,
-    mcVersion,
-    dest,
-    status: build.status,
-    pack: pack?.packPath,
-  });
+  let message = `Installed TT Client (${build.status}) for ${loader} ${mcVersion}\n→ mods/${destName}`;
+  if (build.note) message += `\n${build.note}`;
+  if (pack?.packPath) message += `\nResource pack → ${path.basename(pack.packPath)}`;
 
-  let message = `Installed TT Client for ${loader} ${mcVersion} → ${destName}`;
-  if (build.status === 'experimental') {
-    message += `\n(Experimental: ${build.note || 'may need matching loader profile'})`;
-  }
-  if (pack?.packPath) {
-    message += `\nResource pack → ${path.basename(pack.packPath)}`;
-  }
-
-  return {
-    ok: true,
-    message,
-    jarPath: dest,
-    packPath: pack?.packPath,
-    build,
-  };
+  log.info('installTarget', { loader, mcVersion, dest, status: build.status });
+  return { ok: true, message, jarPath: dest, packPath: pack?.packPath, build };
 }
