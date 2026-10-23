@@ -9,7 +9,6 @@ export interface AccountRecord {
   uuid: string;
   type: 'msa' | 'offline';
   avatarUrl?: string;
-  /** Opaque token payload managed by auth module — never log. */
   tokenBlob?: string;
   expiresAt?: number;
   lastUsed?: number;
@@ -37,6 +36,7 @@ export interface LauncherSettings {
   resolution: { width: number; height: number; fullscreen: boolean };
   jvmArgs: string;
   gameDirectoryRoot: string;
+  ttClientEnabled: boolean;
   autoInstallTtPack: boolean;
   autoEnableTtPack: boolean;
   keepTtPackUpdated: boolean;
@@ -51,6 +51,8 @@ export interface LauncherSettings {
   githubRepo: string;
   msClientId: string;
   lastSelectedAccountId?: string;
+  selectedLoader: 'neoforge' | 'fabric';
+  selectedMinecraftVersion: string;
 }
 
 export interface PackInstallRecord {
@@ -76,9 +78,14 @@ interface Schema {
 }
 
 function defaultGameRoot(): string {
-  // Prefer standard .minecraft adjacent folder for TT instances
-  const home = app.getPath('home');
-  return path.join(home, '.tt-launcher', 'instances');
+  if (process.platform === 'win32') {
+    const appdata = process.env.APPDATA || path.join(app.getPath('home'), 'AppData', 'Roaming');
+    return path.join(appdata, '.minecraft');
+  }
+  if (process.platform === 'darwin') {
+    return path.join(app.getPath('home'), 'Library', 'Application Support', 'minecraft');
+  }
+  return path.join(app.getPath('home'), '.minecraft');
 }
 
 const defaults: Schema = {
@@ -91,6 +98,7 @@ const defaults: Schema = {
     resolution: { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT, fullscreen: false },
     jvmArgs: '',
     gameDirectoryRoot: '',
+    ttClientEnabled: true,
     autoInstallTtPack: true,
     autoEnableTtPack: true,
     keepTtPackUpdated: true,
@@ -104,6 +112,8 @@ const defaults: Schema = {
     githubOwner: TT_GITHUB.owner,
     githubRepo: TT_GITHUB.repo,
     msClientId: '',
+    selectedLoader: 'neoforge',
+    selectedMinecraftVersion: '26.2',
   },
 };
 
@@ -121,6 +131,16 @@ export function getStore(): Store<Schema> {
       s.gameDirectoryRoot = defaultGameRoot();
       store.set('settings', s);
     }
+    let dirty = false;
+    if (!(s as any).selectedLoader) {
+      (s as any).selectedLoader = 'neoforge';
+      dirty = true;
+    }
+    if (!(s as any).selectedMinecraftVersion) {
+      (s as any).selectedMinecraftVersion = '26.2';
+      dirty = true;
+    }
+    if (dirty) store.set('settings', s);
   }
   return store;
 }
