@@ -16,6 +16,7 @@ import * as ttInstall from './tt-install';
 import * as packs from './packs';
 import * as modrinth from './modrinth';
 import * as launch from './launch';
+import { setLaunchProgressCallback } from './launch';
 import * as vanilla from './vanilla-mc';
 import { listAvailableTargets } from './target-install';
 
@@ -211,7 +212,15 @@ ipcMain.handle('mods:list', async () => {
   return [];
 });
 
-ipcMain.handle('launch:play', async () => launch.launchGame());
+ipcMain.handle('launch:play', async () => {
+  setLaunchProgressCallback((p) => send('launch:progress', p));
+  try {
+    return await launch.launchGame();
+  } finally {
+    setLaunchProgressCallback(null);
+  }
+});
+ipcMain.handle('launch:killAll', async () => launch.killAllMinecraftProcesses());
 ipcMain.handle('launch:stop', async () => {
   launch.stopGame();
   return true;
