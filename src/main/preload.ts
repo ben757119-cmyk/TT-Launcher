@@ -61,10 +61,16 @@ const api = {
   vanillaSetup: () => ipcRenderer.invoke('vanilla:setup'),
   importOfficialAccount: () => ipcRenderer.invoke('vanilla:importAccount'),
   getMinecraftDir: () => ipcRenderer.invoke('vanilla:mcDir'),
-
+  listMods: () => ipcRenderer.invoke('mods:list'),
   play: () => ipcRenderer.invoke('launch:play'),
   stop: () => ipcRenderer.invoke('launch:stop'),
   launchStatus: () => ipcRenderer.invoke('launch:status'),
+  killAllProcesses: () => ipcRenderer.invoke('launch:killAll'),
+  onLaunchProgress: (cb: (p: { pct: number; step: string; log: string }) => void) => {
+    const handler = (_: unknown, p: { pct: number; step: string; log: string }) => cb(p);
+    ipcRenderer.on('launch:progress', handler);
+    return () => ipcRenderer.removeListener('launch:progress', handler);
+  },
 
   openExternal: (url: string) => ipcRenderer.invoke('shell:openExternal', url),
   openLog: () => ipcRenderer.invoke('shell:openLog'),
