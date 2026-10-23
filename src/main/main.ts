@@ -17,6 +17,7 @@ import * as packs from './packs';
 import * as modrinth from './modrinth';
 import * as launch from './launch';
 import * as vanilla from './vanilla-mc';
+import { listAvailableTargets } from './target-install';
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -96,6 +97,7 @@ ipcMain.handle('app:getMeta', async () => ({
   owner: TT_OWNER,
   supportedVersions: SUPPORTED_MC_VERSIONS,
   supportedLoaders: SUPPORTED_LOADERS,
+  availableTargets: listAvailableTargets(),
   minecraftDir: vanilla.getDefaultMinecraftDir(),
   logPath: log.path(),
   platform: process.platform,
