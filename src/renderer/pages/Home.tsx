@@ -10,7 +10,6 @@ type Props = {
 };
 
 export default function Home({ account, instance, meta, onNavigate, toast, refresh }: Props) {
-  const [name, setName] = useState('Player');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
@@ -21,7 +20,7 @@ export default function Home({ account, instance, meta, onNavigate, toast, refre
     discord: '@pyforge_',
   };
 
-  const go = async () => {
+  const launch = async () => {
     setBusy(true);
     setErr(null);
     setOk(null);
@@ -29,10 +28,18 @@ export default function Home({ account, instance, meta, onNavigate, toast, refre
       if (!account) {
         try {
           const acc = await window.tt.importOfficialAccount();
-          if (acc) toast(`Using ${acc.name} from Minecraft Launcher`);
-          else await window.tt.signInOffline(name.trim() || 'Player');
+          if (acc) toast(`Using ${acc.name}`);
+          else {
+            setErr(
+              'No Microsoft account found.\n\nOpen the normal Minecraft Launcher, sign in once, close it, then press Launch again.',
+            );
+            return;
+          }
         } catch {
-          await window.tt.signInOffline(name.trim() || 'Player');
+          setErr(
+            'Could not import your Minecraft account.\n\nOpen the normal Minecraft Launcher and sign in once first.',
+          );
+          return;
         }
         refresh();
       }
@@ -44,7 +51,7 @@ export default function Home({ account, instance, meta, onNavigate, toast, refre
       const res = await window.tt.play();
       if (res.ok) {
         setOk(res.message);
-        toast('Launch OK');
+        toast('Launching…');
       } else {
         setErr(res.message);
       }
@@ -56,80 +63,27 @@ export default function Home({ account, instance, meta, onNavigate, toast, refre
     }
   };
 
-  const offline = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      await window.tt.signInOffline(name.trim() || 'Player');
-      toast('Signed in offline — you can Launch now');
-      refresh();
-    } catch (e: any) {
-      setErr(e?.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const useOfficial = async () => {
-    setBusy(true);
-    setErr(null);
-    try {
-      const acc = await window.tt.importOfficialAccount();
-      if (!acc) {
-        setErr(
-          'No account found from the official Minecraft Launcher.\n\n' +
-            '1. Open the normal Minecraft Launcher\n' +
-            '2. Sign in with Microsoft there\n' +
-            '3. Come back and click this again\n\n' +
-            'Or type a name and use Offline (works without Microsoft).',
-        );
-      } else {
-        toast(`Using ${acc.name}`);
-        refresh();
-      }
-    } catch (e: any) {
-      setErr(e?.message || String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <div className="home-wrap">
       <div className="hero">
         <div className="hero-badge">
-          <span>●</span> The Third · by {owner.name}
+          <span>●</span> NeoForge {meta?.ttCompat?.neoforge || '26.2'} · The Third
         </div>
         <h1>TT Client</h1>
         <p>
-          Launch installs TT into your normal <strong>.minecraft</strong> folder and opens the{' '}
-          <strong>official Minecraft Launcher</strong> so your real account works. No Azure setup.
+          One click launches Minecraft with TT in your normal <strong>.minecraft</strong> folder.
+          Sign into the official Minecraft Launcher once so we can use your account.
         </p>
 
-        <div className="row" style={{ marginBottom: 14, maxWidth: 480, flexWrap: 'wrap', gap: 8 }}>
-          <input
-            style={{ flex: 1, minWidth: 140 }}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Offline name"
-          />
-          <button className="btn-secondary" disabled={busy} onClick={offline}>
-            Sign in offline
-          </button>
-          <button className="btn-secondary" disabled={busy} onClick={useOfficial}>
-            Use MC Launcher account
-          </button>
-        </div>
-
         <div className="launch-row">
-          <button className="btn-launch" disabled={busy} onClick={go}>
-            {busy ? 'Working…' : '▶  LAUNCH'}
+          <button className="btn-launch" disabled={busy} onClick={launch}>
+            {busy ? 'Launching…' : '▶  LAUNCH'}
           </button>
           <button className="btn-secondary" onClick={() => onNavigate('play')}>
-            Install TT JAR
+            Install TT Client
           </button>
           <button className="btn-secondary" onClick={() => onNavigate('accounts')}>
-            {account ? account.name : 'Accounts'}
+            {account ? account.name : 'Account'}
           </button>
         </div>
 
@@ -149,7 +103,17 @@ export default function Home({ account, instance, meta, onNavigate, toast, refre
         <div className="stat-card">
           <div className="stat-label">Account</div>
           <div className={`stat-value ${account ? '' : 'muted'}`}>
-            {account ? account.name : 'Not signed in — use Offline'}
+            {account ? account.name : 'Sign in via Minecraft Launcher'}
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">TT Client</div>
+          <div className="stat-value">
+            {instance?.ttClientVersion ? (
+              <span className="badge badge-teal">{instance.ttClientVersion}</span>
+            ) : (
+              <span className="badge badge-warn">Not installed</span>
+            )}
           </div>
         </div>
         <div className="stat-card">
@@ -159,11 +123,9 @@ export default function Home({ account, instance, meta, onNavigate, toast, refre
           </div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Help</div>
+          <div className="stat-label">Support</div>
           <div className="stat-value muted" style={{ fontSize: 12 }}>
-            {owner.email}
-            <br />
-            {owner.discord}
+            {owner.name} · {owner.discord}
           </div>
         </div>
       </div>
