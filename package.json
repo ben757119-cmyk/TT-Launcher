@@ -1,7 +1,7 @@
 {
   "name": "tt-launcher",
-  "version": "1.4.0",
-  "description": "TT Launcher — The Third by The_Algorithm67. Direct launch into .minecraft.",
+  "version": "1.5.0",
+  "description": "TT Launcher — The Third. Fabric + NeoForge, MC 1.21.11–26.2.",
   "main": "dist-electron/main/main.js",
   "author": "The_Algorithm67 <ben757119@gmail.com>",
   "license": "MIT",
@@ -21,16 +21,13 @@
     "appId": "com.ttclient.launcher",
     "productName": "TT Launcher",
     "copyright": "Copyright © The_Algorithm67 / The Third",
-    "directories": {
-      "output": "release",
-      "buildResources": "resources"
-    },
+    "directories": { "output": "release", "buildResources": "resources" },
     "files": ["dist/**/*", "dist-electron/**/*", "package.json"],
-    "extraResources": [{"from": "resources/bundled", "to": "bundled", "filter": ["**/*"]}],
+    "extraResources": [{ "from": "resources/bundled", "to": "bundled", "filter": ["**/*"] }],
     "win": {
       "target": [
-        {"target": "nsis", "arch": ["x64"]},
-        {"target": "portable", "arch": ["x64"]}
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
       ],
       "artifactName": "TT-Launcher-${version}-${arch}.${ext}"
     },
@@ -41,7 +38,7 @@
       "createStartMenuShortcut": true,
       "shortcutName": "TT Launcher"
     },
-    "extraMetadata": {"main": "dist-electron/main/main.js"}
+    "extraMetadata": { "main": "dist-electron/main/main.js" }
   },
   "dependencies": {
     "electron-store": "^8.2.0",
