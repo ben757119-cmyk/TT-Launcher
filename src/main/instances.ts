@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { getStore, InstanceRecord } from './store';
 import { TT_COMPAT, DEFAULT_MEMORY_MB } from './config';
 import { log } from './logger';
+import { getDefaultMinecraftDir, ensureMinecraftLayout } from './vanilla-mc';
 
 export function listInstances(): InstanceRecord[] {
   return getStore().get('instances');
@@ -33,11 +34,12 @@ export function createInstance(opts: {
   const store = getStore();
   const root = store.get('settings').gameDirectoryRoot;
   const id = uuidv4();
-  const slug = opts.name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 40) || 'instance';
+  const slug =
+    opts.name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '')
+      .slice(0, 40) || 'instance';
   const gameDir = path.join(root, `${slug}-${id.slice(0, 8)}`);
   fs.mkdirSync(path.join(gameDir, 'mods'), { recursive: true });
   fs.mkdirSync(path.join(gameDir, 'resourcepacks'), { recursive: true });
@@ -101,6 +103,9 @@ export function deleteInstance(id: string, deleteFiles: boolean): void {
   }
   if (deleteFiles && inst?.gameDir) {
     try {
+      // Never delete the real .minecraft folder
+      const mc = getDefaultMinecraftDir();
+      if (path.resolve(inst.gameDir) === path.resolve(mc)) return;
       fs.rmSync(inst.gameDir, { recursive: true, force: true });
     } catch (e) {
       log.warn('Failed to delete instance files', { err: String(e) });
@@ -117,23 +122,17 @@ export function duplicateInstance(id: string, newName: string): InstanceRecord |
     neoforgeVersion: src.neoforgeVersion,
     memoryMb: src.memoryMb,
   });
-  // Copy mods + resourcepacks
   for (const sub of ['mods', 'resourcepacks', 'config']) {
     const from = path.join(src.gameDir, sub);
     const to = path.join(copy.gameDir, sub);
-    if (fs.existsSync(from)) {
-      copyDir(from, to);
-    }
+    if (fs.existsSync(from)) copyDir(from, to);
   }
   if (src.ttClientJar && fs.existsSync(src.ttClientJar)) {
     const destJar = path.join(copy.gameDir, 'mods', path.basename(src.ttClientJar));
     fs.copyFileSync(src.ttClientJar, destJar);
-    updateInstance(copy.id, {
-      ttClientJar: destJar,
-      ttClientVersion: src.ttClientVersion,
-    });
+    updateInstance(copy.id, { ttClientJar: destJar, ttClientVersion: src.ttClientVersion });
   }
-  return getInstance(copy.id) || copy;
+  return copy;
 }
 
 function copyDir(src: string, dest: string) {
@@ -147,13 +146,39 @@ function copyDir(src: string, dest: string) {
 }
 
 export function ensureTtInstance(): InstanceRecord {
-  const existing = listInstances().find(
-    (i) => i.name === 'TT Client' || i.ttClientJar,
-  );
-  if (existing) return existing;
-  return createInstance({
+  const mcDir = getDefaultMinecraftDir();
+  ensureMinecraftLayout(mcDir);
+  const existing = listInstances().find((i) => i.name === 'TT Client' || i.ttClientJar);
+  if (existing) {
+    if (existing.gameDir !== mcDir) {
+      return (
+        updateInstance(existing.id, {
+          gameDir: mcDir,
+          minecraftVersion: TT_COMPAT.minecraft,
+          neoforgeVersion: TT_COMPAT.neoforge,
+        }) || existing
+      );
+    }
+    return existing;
+  }
+  const store = getStore();
+  const id = uuidv4();
+  const record: InstanceRecord = {
+    id,
     name: 'TT Client',
     minecraftVersion: TT_COMPAT.minecraft,
     neoforgeVersion: TT_COMPAT.neoforge,
-  });
+    gameDir: mcDir,
+    memoryMb: store.get('settings').memoryMb || DEFAULT_MEMORY_MB,
+    jvmArgs: store.get('settings').jvmArgs || '',
+    createdAt: Date.now(),
+  };
+  const instances = store.get('instances');
+  instances.push(record);
+  store.set('instances', instances);
+  const s = store.get('settings');
+  s.defaultInstanceId = id;
+  store.set('settings', s);
+  log.info('Created TT Client instance bound to .minecraft', { mcDir });
+  return record;
 }
