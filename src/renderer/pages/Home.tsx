@@ -91,6 +91,16 @@ export default function Home({ account, instance, meta, onNavigate, toast, refre
 
   const owner = meta?.owner || { name: 'The_Algorithm67', email: 'ben757119@gmail.com', discord: '@pyforge_' };
 
+  const selectStyle: React.CSSProperties = {
+    width: '100%',
+    backgroundColor: '#12131c',
+    border: '1px solid rgba(255,255,255,0.18)',
+    borderRadius: 10,
+    padding: '12px 36px 12px 14px',
+    color: '#f2f3f7',
+    fontWeight: 600,
+  };
+
   return (
     <div className="home-wrap">
       <div className="hero">
@@ -99,23 +109,27 @@ export default function Home({ account, instance, meta, onNavigate, toast, refre
         </div>
         <h1>TT Client</h1>
         <p>
-          Pick your loader and Minecraft version, then Launch. Supports Fabric &amp; NeoForge from 1.21.11 through 26.2.
+          Pick loader + version, then Launch. TT installs into <strong>.minecraft</strong>.
         </p>
 
         <div className="row" style={{ marginBottom: 18, gap: 12, flexWrap: 'wrap', maxWidth: 560, position: 'relative', zIndex: 1 }}>
           <div style={{ flex: '1 1 160px' }}>
-            <label style={{ display: 'block', fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>Loader</label>
-            <select value={loader} onChange={(e) => onLoader(e.target.value as 'neoforge' | 'fabric')} style={{ width: '100%', background: 'var(--bg-0)', border: '1px solid var(--border-strong)', borderRadius: 10, padding: '12px 14px', color: 'var(--text)', fontWeight: 600 }}>
+            <label style={{ display: 'block', fontSize: 12, color: '#8b93a7', marginBottom: 6 }}>Loader</label>
+            <select className="tt-select" value={loader} onChange={(e) => onLoader(e.target.value as 'neoforge' | 'fabric')} style={selectStyle}>
               {loaders.map((l: any) => (
-                <option key={l.id || l} value={l.id || l}>{l.label || l}</option>
+                <option key={l.id || l} value={l.id || l} style={{ backgroundColor: '#12131c', color: '#f2f3f7' }}>
+                  {l.label || l}
+                </option>
               ))}
             </select>
           </div>
           <div style={{ flex: '1 1 160px' }}>
-            <label style={{ display: 'block', fontSize: 12, color: 'var(--text-dim)', marginBottom: 6 }}>Minecraft version</label>
-            <select value={mcVersion} onChange={(e) => onVersion(e.target.value)} style={{ width: '100%', background: 'var(--bg-0)', border: '1px solid var(--border-strong)', borderRadius: 10, padding: '12px 14px', color: 'var(--text)', fontWeight: 600 }}>
+            <label style={{ display: 'block', fontSize: 12, color: '#8b93a7', marginBottom: 6 }}>Minecraft version</label>
+            <select className="tt-select" value={mcVersion} onChange={(e) => onVersion(e.target.value)} style={selectStyle}>
               {versions.map((v) => (
-                <option key={v} value={v}>{v}</option>
+                <option key={v} value={v} style={{ backgroundColor: '#12131c', color: '#f2f3f7' }}>
+                  {v}
+                </option>
               ))}
             </select>
           </div>
