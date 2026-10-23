@@ -21,10 +21,40 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          # no cache: npm — requires package-lock.json which we don't commit yet
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+
+      - name: Download TT Client + resource pack into resources/bundled
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path resources/bundled/variants/neoforge/26.2 | Out-Null
+          New-Item -ItemType Directory -Force -Path resources/bundled/variants/neoforge/26.1 | Out-Null
+          New-Item -ItemType Directory -Force -Path resources/bundled/variants/neoforge/26.0 | Out-Null
+          $jarUrl = "https://github.com/ben757119-cmyk/TT-Client/releases/download/v1.32.0/ttclient-1.32.0.jar"
+          Invoke-WebRequest -Uri $jarUrl -OutFile resources/bundled/ttclient.jar
+          Copy-Item resources/bundled/ttclient.jar resources/bundled/variants/neoforge/26.2/ttclient.jar
+          Copy-Item resources/bundled/ttclient.jar resources/bundled/variants/neoforge/26.1/ttclient.jar
+          Copy-Item resources/bundled/ttclient.jar resources/bundled/variants/neoforge/26.0/ttclient.jar
+          @'
+{
+  "ttClientVersion": "1.32.0",
+  "resourcePack": "TT-Client-ResourcePack.zip",
+  "builds": [
+    { "loader": "neoforge", "minecraft": "26.2", "jar": "variants/neoforge/26.2/ttclient.jar", "status": "supported" },
+    { "loader": "neoforge", "minecraft": "26.1", "jar": "variants/neoforge/26.1/ttclient.jar", "status": "experimental", "note": "Same 26.2 binary — use NeoForge 26.1 profile" },
+    { "loader": "neoforge", "minecraft": "26.0", "jar": "variants/neoforge/26.0/ttclient.jar", "status": "experimental", "note": "Same 26.2 binary — use NeoForge 26.0 profile" }
+  ],
+  "unsupported": {
+    "fabric": "Fabric TT Client is not published yet.",
+    "1.21.x": "TT Client 1.32.0 targets Minecraft 26.2 / NeoForge 26.2."
+  }
+}
+'@ | Set-Content -Encoding utf8 resources/bundled/manifest.json
+          if (-not (Test-Path resources/bundled/TT-Client-ResourcePack.zip)) {
+            Write-Host "Resource pack zip not in repo — pack install will skip if missing"
+          }
+          Get-ChildItem -Recurse resources/bundled | Format-Table FullName, Length
 
       - name: Build renderer + electron
         run: npm run build
