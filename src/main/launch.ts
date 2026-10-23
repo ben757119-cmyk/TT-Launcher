@@ -1,6 +1,5 @@
 /**
  * Full launch pipeline for NeoForge / Fabric.
- * Resolves version inheritance, natives, JVM + game args from version.json.
  */
 
 import { spawn, ChildProcess, execSync } from 'child_process';
@@ -170,16 +169,14 @@ function findJava(configured?: string): string | null {
 
 function probeJavaVersion(javaPath: string): number {
   try {
-    const out = execSync(`"${javaPath}" -version 2>&1`, {
+    execSync('"' + javaPath + '" -version', {
       encoding: 'utf8',
       timeout: 6000,
       windowsHide: true,
-      shell: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const m = String(out).match(/version "(\d+)/i);
-    if (m) return parseInt(m[1], 10);
   } catch (e: any) {
-    const msg = `${e?.stdout || ''}${e?.stderr || ''}${e?.message || ''}`;
+    const msg = String(e?.stderr || e?.stdout || e?.message || '');
     const m = msg.match(/version "(\d+)/i);
     if (m) return parseInt(m[1], 10);
   }
@@ -193,12 +190,10 @@ function probeJavaVersion(javaPath: string): number {
   return 21;
 }
 
-/** Drop JVM flags this Java build does not understand. */
 function filterJvmArgs(args: string[], javaMajor: number): string[] {
   const out: string[] = [];
   for (const a of args) {
     if (!a) continue;
-    // Java 23+ only — causes "Could not create the Java Virtual Machine" on Java 21
     if (a.startsWith('--sun-misc-unsafe-memory-access')) {
       if (javaMajor >= 23) out.push(a);
       else log.info('Stripping unsupported JVM flag', { a, javaMajor });
@@ -349,7 +344,7 @@ function extractNatives(versionJson: any, mcDir: string, nativesDir: string): vo
       }
     } else if (lib.name && String(lib.name).includes(':natives-')) {
       const parts = String(lib.name).split(':');
-      if (parts.length >= 4 && parts[3].includes(`natives-${osKey}`)) {
+      if (parts.length >= 4 && parts[3].includes('natives-' + osKey)) {
         const [g, a, v, classifier] = parts;
         nativePath = path.join(libRoot, ...g.split('.'), a, v, `${a}-${v}-${classifier}.jar`);
       }
@@ -358,12 +353,15 @@ function extractNatives(versionJson: any, mcDir: string, nativesDir: string): vo
     if (!nativePath || !fs.existsSync(nativePath)) continue;
     try {
       if (process.platform === 'win32') {
-        execSync(`tar -xf "${nativePath}" -C "${nativesDir}"`, {
-          windowsHide: true, timeout: 15000, stdio: 'ignore',
+        execSync('tar -xf "' + nativePath + '" -C "' + nativesDir + '"', {
+          windowsHide: true,
+          timeout: 15000,
+          stdio: 'ignore',
         });
       } else {
-        execSync(`unzip -o -q "${nativePath}" -d "${nativesDir}"`, {
-          timeout: 15000, stdio: 'ignore',
+        execSync('unzip -o -q "' + nativePath + '" -d "' + nativesDir + '"', {
+          timeout: 15000,
+          stdio: 'ignore',
         });
       }
     } catch {
@@ -530,8 +528,7 @@ export async function launchGame(): Promise<{
   if (!found) {
     return {
       ok: false,
-      message:
-        `No ${loader} install found for Minecraft ${mcVersion}.\nInstall NeoForge/Fabric once, then Launch again.`,
+      message: `No ${loader} install found for Minecraft ${mcVersion}. Install NeoForge/Fabric once, then Launch again.`,
       needsSetup: true,
     };
   }
@@ -615,15 +612,24 @@ export async function launchGame(): Promise<{
   let game = gameFromJson;
   if (!game.length) {
     game = [
-      '--username', identity.username,
-      '--uuid', identity.uuid,
-      '--accessToken', identity.accessToken || '0',
-      '--version', versionId,
-      '--gameDir', mcDir,
-      '--assetsDir', assetsDir,
-      '--assetIndex', assetIndex,
-      '--userType', identity.offline ? 'legacy' : 'msa',
-      '--versionType', 'TT-Launcher',
+      '--username',
+      identity.username,
+      '--uuid',
+      identity.uuid,
+      '--accessToken',
+      identity.accessToken || '0',
+      '--version',
+      versionId,
+      '--gameDir',
+      mcDir,
+      '--assetsDir',
+      assetsDir,
+      '--assetIndex',
+      assetIndex,
+      '--userType',
+      identity.offline ? 'legacy' : 'msa',
+      '--versionType',
+      'TT-Launcher',
     ];
   }
 
@@ -642,7 +648,7 @@ export async function launchGame(): Promise<{
   try {
     fs.writeFileSync(
       path.join(mcDir, 'tt-last-launch.txt'),
-      [`java=${java}`, `mainClass=${mainClass}`, `version=${versionId}`, `javaMajor=${javaMajor}`, '', ...args].join('\n'),
+      ['java=' + java, 'mainClass=' + mainClass, 'version=' + versionId, 'javaMajor=' + javaMajor, '', ...args].join('\n'),
       'utf8',
     );
   } catch {
@@ -659,7 +665,7 @@ export async function launchGame(): Promise<{
       windowsHide: false,
     });
   } catch (e: any) {
-    return { ok: false, message: `Could not start Java:\n${e?.message || e}`, needsSetup: true };
+    return { ok: false, message: 'Could not start Java:\n' + (e?.message || e), needsSetup: true };
   }
 
   running = child;
@@ -699,7 +705,7 @@ export async function launchGame(): Promise<{
 
   if (spawnError) {
     running = null;
-    return { ok: false, message: `Java failed to start (${spawnError}).`, needsSetup: true };
+    return { ok: false, message: 'Java failed to start (' + spawnError + ').', needsSetup: true };
   }
 
   const earlyExit = await new Promise<{ code: number | null } | null>((resolve) => {
@@ -743,8 +749,11 @@ export async function launchGame(): Promise<{
         return {
           ok: true,
           message:
-            `Direct launch failed. Opened official Minecraft Launcher.\n` +
-            `Select profile "TT Client" (${versionId}) and press Play.\n\nLog:\n${snippet}`,
+            'Direct launch failed. Opened official Minecraft Launcher.\n' +
+            'Select profile "TT Client" (' +
+            versionId +
+            ') and press Play.\n\nLog:\n' +
+            snippet,
         };
       } catch {
         /* */
@@ -753,7 +762,7 @@ export async function launchGame(): Promise<{
 
     return {
       ok: false,
-      message: `Minecraft failed to start.\n\nLog:\n${snippet}`,
+      message: 'Minecraft failed to start.\n\nLog:\n' + snippet,
       needsSetup: true,
     };
   }
@@ -765,10 +774,10 @@ export async function launchGame(): Promise<{
 
   updateInstance(instance.id, { lastPlayed: Date.now() });
   ensureLauncherProfile(mcDir, versionId, 'TT Client');
-  report(100, 'done', `Game running (pid ${child.pid}). Window should appear shortly…`);
+  report(100, 'done', 'Game running (pid ' + child.pid + '). Window should appear shortly…');
   return {
     ok: true,
-    message: `Launching ${loader} ${versionId}…\nPID ${child.pid}`,
+    message: 'Launching ' + loader + ' ' + versionId + '…\nPID ' + child.pid,
     pid: child.pid,
   };
 }
@@ -791,8 +800,11 @@ export function killAllMinecraftProcesses(): { ok: boolean; message: string; kil
   if (process.platform === 'win32') {
     for (const name of ['javaw.exe', 'java.exe', 'Minecraft.exe', 'MinecraftLauncher.exe']) {
       try {
-        execSync(`taskkill /F /IM ${name} /T`, {
-          encoding: 'utf8', timeout: 8000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+        execSync('taskkill /F /IM ' + name + ' /T', {
+          encoding: 'utf8',
+          timeout: 8000,
+          windowsHide: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
         });
         killed.push(name);
       } catch {
@@ -802,7 +814,7 @@ export function killAllMinecraftProcesses(): { ok: boolean; message: string; kil
   }
   return {
     ok: true,
-    message: `Ended processes: ${killed.join(', ')}`,
+    message: 'Ended processes: ' + killed.join(', '),
     killed,
   };
 }
