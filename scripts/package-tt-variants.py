@@ -1,4 +1,5 @@
-"""Package TT Client jars for NeoForge 26.x (full) and 1.21.x (lite)."""
+"""Package TT Client jars: full 26.x + lite 1.21.1–1.21.11."""
+import json
 import zipfile
 import urllib.request
 from pathlib import Path
@@ -7,8 +8,9 @@ ROOT = Path(__file__).resolve().parents[1]
 BUNDLED = ROOT / "resources" / "bundled"
 OUT = BUNDLED / "variants" / "neoforge"
 SRC = BUNDLED / "ttclient.jar"
+LITE_TAG = "lite-1.21-1"
 
-FULL_VARIANTS = {
+FULL = {
     "26.2": ("[26.2.0.64,)", "[26.2]", "TT Client full for NeoForge 26.2"),
     "26.1": ("[26.1.0,)", "[26.1,26.2)", "TT Client for NeoForge 26.1"),
     "26.0": ("[26.0.0,)", "[26.0,26.1)", "TT Client for NeoForge 26.0"),
@@ -20,154 +22,108 @@ LITE_MCS = [
 ]
 
 
-def toml(label, neo, mc, desc, version="1.32.0"):
-    return (
-        'license="MIT"\n\n'
-        '[[mods]]\n'
-        'modId="ttclient"\n'
-        f'version="{version}-{label}"\n'
-        'displayName="TT Client"\n'
-        'authors="The_Algorithm67"\n'
-        'description="""\n'
-        f'{desc}\n'
-        '"""\n\n'
-        '[[dependencies.ttclient]]\n'
-        '    modId="neoforge"\n'
-        '    type="required"\n'
-        f'    versionRange="{neo}"\n'
-        '    ordering="NONE"\n'
-        '    side="CLIENT"\n\n'
-        '[[dependencies.ttclient]]\n'
-        '    modId="minecraft"\n'
-        '    type="required"\n'
-        f'    versionRange="{mc}"\n'
-        '    ordering="NONE"\n'
-        '    side="CLIENT"\n\n'
-        '[[mixins]]\n'
-        'config="ttclient.mixins.json"\n'
-    )
-
-
 def download(url: str, dest: Path) -> bool:
     try:
         print("GET", url)
+        dest.parent.mkdir(parents=True, exist_ok=True)
         urllib.request.urlretrieve(url, dest)
-        return dest.exists() and dest.stat().st_size > 1000
+        ok = dest.exists() and dest.stat().st_size > 1000
+        print("  ->", dest.stat().st_size if ok else "FAIL")
+        return ok
     except Exception as e:
-        print("fail", url, e)
+        print("  fail:", e)
         return False
 
 
-def ensure_full_src():
-    if SRC.exists() and SRC.stat().st_size > 10000:
-        return True
-    url = "https://github.com/ben757119-cmyk/TT-Client/releases/download/v1.32.0/ttclient-1.32.0.jar"
-    SRC.parent.mkdir(parents=True, exist_ok=True)
-    return download(url, SRC)
+def make_toml(label, neo, mc, desc, version="1.32.0"):
+    return (
+        f'license="MIT"\n\n'
+        f'[[mods]]\n'
+        f'modId="ttclient"\n'
+        f'version="{version}-{label}"\n'
+        f'displayName="TT Client"\n'
+        f'authors="The_Algorithm67"\n'
+        f'description="""\n{desc}\n"""\n\n'
+        f'[[dependencies.ttclient]]\n'
+        f'    modId="neoforge"\n'
+        f'    type="required"\n'
+        f'    versionRange="{neo}"\n'
+        f'    ordering="NONE"\n'
+        f'    side="CLIENT"\n\n'
+        f'[[dependencies.ttclient]]\n'
+        f'    modId="minecraft"\n'
+        f'    type="required"\n'
+        f'    versionRange="{mc}"\n'
+        f'    ordering="NONE"\n'
+        f'    side="CLIENT"\n\n'
+        f'[[mixins]]\n'
+        f'config="ttclient.mixins.json"\n'
+    )
 
 
 def package_full():
-    if not ensure_full_src():
-        print("No full TT Client jar")
+    if not SRC.exists() or SRC.stat().st_size < 10000:
+        download(
+            "https://github.com/ben757119-cmyk/TT-Client/releases/download/v1.32.0/ttclient-1.32.0.jar",
+            SRC,
+        )
+    if not SRC.exists():
+        print("No full jar")
         return
-    for label, (neo, mc, desc) in FULL_VARIANTS.items():
-        dest_dir = OUT / label
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / "ttclient.jar"
-        body = toml(label, neo, mc, desc).encode("utf-8")
+    for label, (neo, mc, desc) in FULL.items():
+        dest = OUT / label / "ttclient.jar"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        body = make_toml(label, neo, mc, desc).encode("utf-8")
         with zipfile.ZipFile(SRC, "r") as zin, zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as zout:
             for info in zin.infolist():
                 data = zin.read(info.filename)
-                name = info.filename.replace("\\", "/")
-                if name.endswith("META-INF/neoforge.mods.toml"):
+                if info.filename.replace("\\", "/").endswith("META-INF/neoforge.mods.toml"):
                     data = body
-                # drop mixins ref if we want safer 26.0 — keep for full
                 zout.writestr(info, data)
         print("full", dest, dest.stat().st_size)
 
 
 def package_lite():
-    """Pull lite 1.21 jars from latest TT-Client lite release if present."""
-    # Try known tag patterns then latest release assets
-    candidates = []
-    # Prefer explicit lite release asset names
-    for tag in ["lite-1.21-1", "lite-1.21-2", "lite-1.21-3", "v2.0.0-lite"]:
-        for mc in LITE_MCS:
-            candidates.append(
-                (
-                    mc,
-                    f"https://github.com/ben757119-cmyk/TT-Client/releases/download/{tag}/ttclient-neoforge-{mc}.jar",
-                )
-            )
-    # Also try 1.21.1 only from any lite tag
-    for tag in ["lite-1.21-1", "lite-1.21-2"]:
-        candidates.append(
-            (
-                "1.21.1",
-                f"https://github.com/ben757119-cmyk/TT-Client/releases/download/{tag}/ttclient-neoforge-1.21.1.jar",
-            )
-        )
-
-    got = {}
-    for mc, url in candidates:
-        if mc in got:
-            continue
-        dest_dir = OUT / mc
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / "ttclient.jar"
-        if download(url, dest):
-            got[mc] = dest
-            print("lite", dest, dest.stat().st_size)
-
-    # If we only got 1.21.1, copy to other 1.21.x slots (same NeoForge 21.1-line lite)
-    if "1.21.1" in got:
-        src = got["1.21.1"]
-        for mc in LITE_MCS:
-            if mc in got:
-                continue
-            dest_dir = OUT / mc
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            dest = dest_dir / "ttclient.jar"
-            dest.write_bytes(src.read_bytes())
-            got[mc] = dest
-            print("lite-copy", dest)
-
-    if not got:
-        print("No lite 1.21 jars available yet (CI still building)")
+    for mc in LITE_MCS:
+        url = f"https://github.com/ben757119-cmyk/TT-Client/releases/download/{LITE_TAG}/ttclient-neoforge-{mc}.jar"
+        dest = OUT / mc / "ttclient.jar"
+        if not download(url, dest):
+            base = OUT / "1.21.1" / "ttclient.jar"
+            if base.exists() and mc != "1.21.1":
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_bytes(base.read_bytes())
+                print("lite-copy", dest)
 
 
 def write_manifest():
     builds = []
-    for label in FULL_VARIANTS:
-        builds.append(
-            {
+    for label in FULL:
+        if (OUT / label / "ttclient.jar").exists():
+            builds.append({
                 "loader": "neoforge",
                 "minecraft": label,
                 "jar": f"variants/neoforge/{label}/ttclient.jar",
                 "status": "supported" if label == "26.2" else "experimental",
-            }
-        )
+            })
     for mc in LITE_MCS:
-        p = OUT / mc / "ttclient.jar"
-        if p.exists():
-            builds.append(
-                {
-                    "loader": "neoforge",
-                    "minecraft": mc,
-                    "jar": f"variants/neoforge/{mc}/ttclient.jar",
-                    "status": "experimental",
-                    "note": "TT Client Lite for NeoForge 1.21.x",
-                }
-            )
-    import json
-
+        if (OUT / mc / "ttclient.jar").exists():
+            builds.append({
+                "loader": "neoforge",
+                "minecraft": mc,
+                "jar": f"variants/neoforge/{mc}/ttclient.jar",
+                "status": "experimental",
+                "note": "TT Client Lite for NeoForge 1.21.x",
+            })
     man = {
-        "ttClientVersion": "1.32.0+lite",
+        "ttClientVersion": "1.32.0+lite-1.21",
         "resourcePack": "TT-Client-ResourcePack.zip",
         "builds": builds,
     }
+    BUNDLED.mkdir(parents=True, exist_ok=True)
     (BUNDLED / "manifest.json").write_text(json.dumps(man, indent=2) + "\n")
-    print("manifest builds", len(builds))
+    print("manifest builds:", len(builds))
+    for b in builds:
+        print(" ", b["loader"], b["minecraft"], b["status"])
 
 
 def main():

@@ -31,11 +31,11 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Package TT Client jars for NeoForge 26.0 / 26.1 / 26.2
+      - name: Package TT Client jars (26.x full + 1.21.x lite)
         shell: pwsh
         run: |
           python scripts/package-tt-variants.py
-          Get-ChildItem -Path resources/bundled -Recurse -Filter *.jar | ForEach-Object { $_.FullName + " " + $_.Length }
+          Get-ChildItem -Path resources/bundled/variants -Recurse -Filter *.jar | ForEach-Object { $_.FullName + " " + $_.Length }
 
       - name: Build renderer + electron
         run: npm run build
@@ -60,7 +60,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ github.run_number }}
-          name: TT Launcher build ${{ github.run_number }}
+          name: TT Launcher ${{ github.run_number }} (v1.8.0)
           draft: false
           prerelease: true
           files: |
