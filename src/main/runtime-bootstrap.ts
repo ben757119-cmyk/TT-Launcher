@@ -47,7 +47,7 @@ function report(
 function httpsGetText(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     https
-      .get(url, { headers: { 'User-Agent': 'TT-Launcher/1.7.5' } }, (res) => {
+      .get(url, { headers: { 'User-Agent': 'TT-Launcher/1.7.6' } }, (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           httpsGetText(res.headers.location).then(resolve, reject);
           return;
@@ -197,22 +197,39 @@ export async function ensureManagedJava(
   return { ok: true, javaPath, message: 'Installed managed Java ' + major };
 }
 
+/** MC 1.21.1 → 21.1 | MC 1.21 → 21.0 | MC 26.2 → 26.2 */
+function mcToNeoForgePrefix(mcVersion: string): string {
+  const v = String(mcVersion || '').trim();
+  const m = v.match(/^1\.(\d+)(?:\.(\d+))?$/);
+  if (m) {
+    return m[1] + '.' + (m[2] ?? '0');
+  }
+  return v;
+}
+
 async function resolveNeoForgeVersion(mcFamily: string): Promise<string | null> {
   try {
+    const prefix = mcToNeoForgePrefix(mcFamily);
     const xml = await httpsGetText(
       'https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml',
     );
     const versions = [...xml.matchAll(/<version>([^<]+)<\/version>/g)].map((m) => m[1]);
     const matched = versions.filter(
-      (v) => v.startsWith(mcFamily + '.') || v.startsWith(mcFamily + '-'),
+      (ver) => ver === prefix || ver.startsWith(prefix + '.') || ver.startsWith(prefix + '-'),
     );
-    if (matched.length) return matched[matched.length - 1];
-    const parts = mcFamily.split('.');
-    if (parts.length >= 2) {
-      const prefix = parts[0] + '.' + parts[1];
-      const m2 = versions.filter((v) => v.startsWith(prefix));
-      if (m2.length) return m2[m2.length - 1];
+    if (matched.length) {
+      matched.sort((a, b) => {
+        const pa = a.split(/[.-]/).map((x) => parseInt(x, 10) || 0);
+        const pb = b.split(/[.-]/).map((x) => parseInt(x, 10) || 0);
+        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+          const d = (pb[i] || 0) - (pa[i] || 0);
+          if (d !== 0) return d;
+        }
+        return 0;
+      });
+      return matched[0];
     }
+    log.warn('No NeoForge versions matched prefix', { mcFamily, prefix, sample: versions.slice(-5) });
   } catch (e) {
     log.warn('NeoForge metadata fetch failed', { err: String(e) });
   }
@@ -223,8 +240,18 @@ function neoforgeAlreadyInstalled(mcDir: string, mcFamily: string): string | nul
   const versionsRoot = path.join(mcDir, 'versions');
   if (!fs.existsSync(versionsRoot)) return null;
   const folders = fs.readdirSync(versionsRoot);
+  const prefix = mcToNeoForgePrefix(mcFamily);
   const hit = folders
-    .filter((n) => n.toLowerCase().includes('neoforge') && n.includes(mcFamily))
+    .filter((n) => {
+      const lower = n.toLowerCase();
+      if (!lower.includes('neoforge')) return false;
+      const pref = prefix.toLowerCase();
+      const fam = mcFamily.toLowerCase();
+      // Strict: 26.2 must not match 26.1
+      if (lower.includes(pref)) return true;
+      if (lower.includes(fam)) return true;
+      return false;
+    })
     .sort()
     .reverse();
   return hit[0] || null;
@@ -250,7 +277,9 @@ export async function ensureNeoForgeClient(
       message:
         'Could not resolve NeoForge for ' +
         mcFamily +
-        '.\nInstall from https://neoforged.net/ once.',
+        ' (prefix ' +
+        mcToNeoForgePrefix(mcFamily) +
+        ').\nInstall from https://neoforged.net/ once.',
     };
   }
 
