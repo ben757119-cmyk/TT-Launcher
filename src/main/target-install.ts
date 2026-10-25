@@ -1,6 +1,6 @@
 /**
- * Install TT Client jar for the selected loader + MC version only.
- * Uses .minecraft/tt-instances/<loader>-<mc>/mods (not shared mods/).
+ * Install TT Client jar for exact version match only.
+ * Other versions get a clean instance (loader-only) — same layout, no wrong jar.
  */
 
 import fs from 'fs';
@@ -77,7 +77,6 @@ export function findTargetBuild(loader: TtLoader, mcVersion: string): TargetBuil
       status: loader === 'neoforge' && mcVersion === '26.2' ? 'supported' : 'best-effort',
     };
   }
-  // Root jar is ONLY for NeoForge 26.2 — never for 26.1 / 1.21.x
   if (loader === 'neoforge' && mcVersion === '26.2' && resolveBundledFile(BUNDLED.ttJar)) {
     return { loader: 'neoforge', minecraft: '26.2', jar: BUNDLED.ttJar, status: 'supported' };
   }
@@ -102,7 +101,7 @@ function disableOtherTtJars(modsDir: string, keepName: string) {
   for (const f of fs.readdirSync(modsDir)) {
     if (!/^ttclient.*\.jar(\.disabled)?$/i.test(f)) continue;
     const full = path.join(modsDir, f);
-    if (f === keepName) {
+    if (keepName && f === keepName) {
       if (f.endsWith('.disabled')) {
         try {
           fs.renameSync(full, path.join(modsDir, f.slice(0, -'.disabled'.length)));
@@ -122,7 +121,6 @@ function disableOtherTtJars(modsDir: string, keepName: string) {
   }
 }
 
-/** Instance root: .minecraft/tt-instances/<loader>-<mcVersion>/ */
 export function getTtInstanceDir(loader: TtLoader, mcVersion: string): string {
   return path.join(getDefaultMinecraftDir(), 'tt-instances', `${loader}-${mcVersion}`);
 }
@@ -147,41 +145,33 @@ export function installTarget(
   fs.mkdirSync(path.join(instanceDir, 'config'), { recursive: true });
   fs.mkdirSync(path.join(instanceDir, 'resourcepacks'), { recursive: true });
 
+  const pack = installBundledPackIntoMinecraft(mcDir);
   const build = findTargetBuild(loader, mcVersion);
-  if (!build) {
-    return {
-      ok: false,
-      message:
-        `No TT Client jar for ${loader} + Minecraft ${mcVersion}.\n\n` +
-        `Full TT Client currently ships for NeoForge 26.2 only.\n` +
-        `Select NeoForge + 26.2.\n\n` +
-        `Available:\n` +
-        listAvailableTargets()
-          .map((b) => `  • ${b.loader} ${b.minecraft} (${b.status})`)
-          .join('\n'),
-    };
-  }
 
-  if (build.minecraft !== mcVersion) {
-    return {
-      ok: false,
-      message:
-        `Jar mismatch: selected ${mcVersion} but jar is for ${build.minecraft}.\n` +
-        `Pick ${build.minecraft} in the version dropdown.`,
-    };
+  if (!build || build.minecraft !== mcVersion) {
+    disableOtherTtJars(modsDir, '');
+    const msg =
+      `Instance ready for ${loader} ${mcVersion} (loader only — no TT Client jar for this version).\n` +
+      `→ tt-instances/${loader}-${mcVersion}/\n` +
+      `Full TT Client is NeoForge 26.2. Other versions use the same layout so it feels the same.`;
+    log.info('installTarget loader-only', { loader, mcVersion, instanceDir });
+    return { ok: true, message: msg, instanceDir, packPath: pack?.packPath };
   }
 
   const src = resolveBundledFile(build.jar);
   if (!src || !fs.existsSync(src)) {
-    return { ok: false, message: `Bundled jar missing: ${build.jar}` };
+    return {
+      ok: true,
+      message: `Instance ready; jar file missing (${build.jar}). Launching loader only.`,
+      instanceDir,
+      packPath: pack?.packPath,
+    };
   }
 
   const destName = `ttclient-${loader}-${mcVersion}.jar`;
   const dest = path.join(modsDir, destName);
   fs.copyFileSync(src, dest);
   disableOtherTtJars(modsDir, destName);
-
-  const pack = installBundledPackIntoMinecraft(mcDir);
 
   let message =
     `Installed TT Client (${build.status}) for ${loader} ${mcVersion}\n` +
