@@ -7,10 +7,24 @@
       "minecraft": "26.2",
       "jar": "variants/neoforge/26.2/ttclient.jar",
       "status": "supported"
+    },
+    {
+      "loader": "neoforge",
+      "minecraft": "26.1",
+      "jar": "variants/neoforge/26.1/ttclient.jar",
+      "status": "experimental",
+      "note": "Full TT Client 26.x with deps opened for NeoForge 26.1"
+    },
+    {
+      "loader": "neoforge",
+      "minecraft": "26.0",
+      "jar": "variants/neoforge/26.0/ttclient.jar",
+      "status": "experimental",
+      "note": "Full TT Client 26.x with deps opened for NeoForge 26.0"
     }
   ],
   "unsupported": {
-    "fabric": "Fabric port not published yet — select NeoForge.",
-    "other": "Full TT Client ships for NeoForge 26.2. Other versions launch NeoForge only with the same instance layout."
+    "fabric": "Fabric port not published yet.",
+    "1.21.x": "1.21.x needs a separate NeoForge 21.x compile. Use 26.x for full TT Client."
   }
 }

@@ -23,21 +23,19 @@ jobs:
           node-version: "20"
           cache: npm
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Ensure TT Client 26.2 jar only
+      - name: Package TT Client jars for NeoForge 26.0 / 26.1 / 26.2
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path resources/bundled/variants/neoforge/26.2 | Out-Null
-          if (Test-Path resources/bundled/ttclient.jar) {
-            Copy-Item resources/bundled/ttclient.jar resources/bundled/variants/neoforge/26.2/ttclient.jar -Force
-          }
-          Get-ChildItem -Path resources/bundled/variants -Recurse -Filter ttclient.jar -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -notmatch 'neoforge[\\/]26\.2[\\/]' } |
-            Remove-Item -Force
-          Write-Host "Bundled jars:"
-          Get-ChildItem -Path resources/bundled -Recurse -Filter *.jar | ForEach-Object { $_.FullName }
+          python scripts/package-tt-variants.py
+          Get-ChildItem -Path resources/bundled -Recurse -Filter *.jar | ForEach-Object { $_.FullName + " " + $_.Length }
 
       - name: Build renderer + electron
         run: npm run build
