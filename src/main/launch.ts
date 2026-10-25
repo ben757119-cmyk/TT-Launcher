@@ -1,4 +1,4 @@
-/** Full launch pipeline — managed Java/NeoForge bootstrap + version.json launch. */
+/** Full launch pipeline — managed Java/NeoForge, per-version instance, fresh auth. */
 
 import { spawn, ChildProcess, execSync } from 'child_process';
 import fs from 'fs';
@@ -9,7 +9,7 @@ import { getStore } from './store';
 import { log } from './logger';
 import { TT_COMPAT, TtLoader } from './config';
 import { getDefaultMinecraftDir, importOfficialLauncherAccount } from './vanilla-mc';
-import { installTarget } from './target-install';
+import { installTarget, getTtInstanceDir } from './target-install';
 import {
   ensureManagedJava,
   ensureNeoForgeClient,
@@ -47,6 +47,12 @@ export function getRunningPid(): number | null {
   return running?.pid ?? null;
 }
 
+function formatUuid(uuid: string): string {
+  const h = String(uuid || '').replace(/-/g, '').toLowerCase();
+  if (h.length !== 32) return uuid || '00000000-0000-0000-0000-000000000000';
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 function findJava(configured?: string): string | null {
   if (configured && fs.existsSync(configured)) return configured;
   for (const major of [25, 24, 23, 22, 21]) {
@@ -62,7 +68,6 @@ function findJava(configured?: string): string | null {
   const home = process.env.USERPROFILE || process.env.HOME || '';
   const localApp = process.env.LOCALAPPDATA || (home ? path.join(home, 'AppData', 'Local') : '');
   const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
-  const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
   const candidates: string[] = [];
   if (process.env.JAVA_HOME) {
     for (const n of preferredNames) candidates.push(path.join(process.env.JAVA_HOME, 'bin', n));
@@ -71,15 +76,13 @@ function findJava(configured?: string): string | null {
     const roots = [
       path.join(localApp, 'Packages', 'Microsoft.4297127D64EC6_8wekyb3d8bbwe', 'LocalCache', 'Local', 'runtime'),
       path.join(home, '.minecraft', 'runtime'),
-      path.join(localApp, 'MinecraftLauncher', 'runtime'),
-      path.join(programFiles, 'Minecraft Launcher', 'runtime'),
     ];
     for (const root of roots) {
       if (!fs.existsSync(root)) continue;
       try {
         const stack = [root];
         let seen = 0;
-        while (stack.length && seen < 300) {
+        while (stack.length && seen < 200) {
           const dir = stack.pop()!;
           seen++;
           let entries: fs.Dirent[];
@@ -99,53 +102,8 @@ function findJava(configured?: string): string | null {
       }
     }
   }
-  if (isWin) {
-    for (const root of [programFiles, programFilesX86]) {
-      for (const vendor of ['Eclipse Adoptium', 'Java', 'Microsoft', 'Amazon Corretto', 'Temurin', 'Zulu']) {
-        const vendorDir = path.join(root, vendor);
-        if (!fs.existsSync(vendorDir)) continue;
-        try {
-          for (const name of fs.readdirSync(vendorDir)) {
-            for (const n of preferredNames) {
-              const bin = path.join(vendorDir, name, 'bin', n);
-              if (fs.existsSync(bin)) candidates.push(bin);
-            }
-          }
-        } catch {
-          /* */
-        }
-      }
-    }
-  }
-  const scored = candidates
-    .filter((c) => {
-      try {
-        return !!c && fs.existsSync(c);
-      } catch {
-        return false;
-      }
-    })
-    .map((c) => {
-      let score = 0;
-      const lower = c.toLowerCase();
-      if (lower.includes('javaw')) score += 5;
-      if (lower.includes('jdk-25') || lower.includes('25.')) score += 80;
-      if (lower.includes('jdk-24') || lower.includes('24.')) score += 50;
-      if (lower.includes('21')) score += 20;
-      return { c, score };
-    })
-    .sort((a, b) => b.score - a.score);
-  if (scored[0]) return scored[0].c;
-  try {
-    const cmd = isWin ? 'where java' : 'which java';
-    const out = execSync(cmd, { encoding: 'utf8', timeout: 3000, windowsHide: true })
-      .trim()
-      .split(/\r?\n/)[0];
-    if (out && fs.existsSync(out)) return out;
-  } catch {
-    /* */
-  }
-  return null;
+  const scored = candidates.filter((c) => fs.existsSync(c));
+  return scored[0] || null;
 }
 
 function probeJavaVersion(javaPath: string): number {
@@ -162,9 +120,8 @@ function probeJavaVersion(javaPath: string): number {
     if (m) return parseInt(m[1], 10);
   }
   const lower = javaPath.toLowerCase();
-  if (lower.includes('jdk-25') || lower.includes('jre-25')) return 25;
-  if (lower.includes('java-runtime-delta')) return 21;
-  if (lower.includes('jdk-21')) return 21;
+  if (lower.includes('jdk-25')) return 25;
+  if (lower.includes('jdk-21') || lower.includes('java-runtime-delta')) return 21;
   return 21;
 }
 
@@ -190,35 +147,28 @@ function findLoaderVersion(
 ): { versionDir: string; versionId: string; versionJson: any } | null {
   const versionsRoot = path.join(mcDir, 'versions');
   if (!fs.existsSync(versionsRoot)) return null;
-  const folders = fs
-    .readdirSync(versionsRoot, { withFileTypes: true })
-    .filter((d) => d.isDirectory())
-    .map((d) => d.name);
+  const folders = fs.readdirSync(versionsRoot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
 
   const score = (name: string) => {
     let s = 0;
     const lower = name.toLowerCase();
     if (loader === 'neoforge') {
-      if (lower.includes('neoforge')) s += 100;
-      else return 0;
+      if (!lower.includes('neoforge')) return 0;
+      s += 100;
     } else {
-      if (lower.includes('fabric')) s += 100;
-      else return 0;
+      if (!lower.includes('fabric')) return 0;
+      s += 100;
     }
     if (preferredMc) {
       const pref = preferredMc.toLowerCase();
-      // Never pick 26.1 when user asked for 26.2
-      if (lower.includes(pref)) {
-        s += 200;
-      } else {
+      if (lower.includes(pref)) s += 200;
+      else {
         const m = pref.match(/^1\.(\d+)(?:\.(\d+))?$/);
         if (m) {
           const nfPref = m[1] + '.' + (m[2] ?? '0');
           if (lower.includes(nfPref)) s += 200;
           else return 0;
-        } else {
-          return 0;
-        }
+        } else return 0;
       }
     }
     return s;
@@ -227,7 +177,7 @@ function findLoaderVersion(
   const ranked = folders
     .map((name) => ({ name, score: score(name) }))
     .filter((x) => x.score > 0)
-    .sort((a, b) => b.score - a.score || b.name.localeCompare(a.name));
+    .sort((a, b) => b.score - a.score);
 
   for (const { name } of ranked) {
     const jsonPath = path.join(versionsRoot, name, name + '.json');
@@ -383,20 +333,6 @@ function buildJvmAndGameArgs(versionJson: any, vars: Record<string, string>): { 
   return { jvm, game };
 }
 
-function findOfficialLauncher(): string | null {
-  if (process.platform !== 'win32') return null;
-  const home = process.env.USERPROFILE || '';
-  const localApp = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-  const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
-  for (const c of [
-    path.join(programFiles, 'Minecraft Launcher', 'MinecraftLauncher.exe'),
-    path.join(localApp, 'Programs', 'Minecraft Launcher', 'MinecraftLauncher.exe'),
-  ]) {
-    if (fs.existsSync(c)) return c;
-  }
-  return null;
-}
-
 function ensureLauncherProfile(mcDir: string, versionId: string, profileName: string): void {
   const profilesPath = path.join(mcDir, 'launcher_profiles.json');
   let data: any = { profiles: {}, settings: {}, version: 3 };
@@ -433,31 +369,26 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   const loader = (settings.selectedLoader === 'fabric' ? 'fabric' : 'neoforge') as TtLoader;
   const mcVersion = String(settings.selectedMinecraftVersion || TT_COMPAT.minecraft);
 
-  report(8, 'account', 'Resolving account…');
-  let account = getActiveAccount();
-  if (!account) account = importOfficialLauncherAccount();
+  report(8, 'account', 'Resolving account (fresh token from official launcher)…');
+  // Re-import every launch so multiplayer tokens stay valid
+  let account = importOfficialLauncherAccount() || getActiveAccount();
   if (!account) {
     return {
       ok: false,
       message:
-        'No account found.\n\nOpen the normal Minecraft Launcher once, sign in, close it, then Launch again.',
+        'No account found.\n\nOpen the normal Minecraft Launcher once, sign in, close it, then Launch again.\n' +
+        'Server join needs a real Microsoft session from the official launcher.',
       needsSetup: true,
     };
   }
 
   const needJava = requiredJavaForMc(mcVersion);
-  report(12, 'bootstrap', 'Ensuring managed Java ' + needJava + ' (TT folder only)…');
+  report(12, 'bootstrap', 'Ensuring managed Java ' + needJava + ' (cached under LocalAppData\\TT-Client)…');
   const javaBoot = await ensureManagedJava(needJava, (p) =>
     report(Math.min(30, 12 + p.pct * 0.15), p.step, p.log),
   );
   if (!javaBoot.ok || !javaBoot.javaPath) {
     return { ok: false, message: javaBoot.message || 'Could not install Java ' + needJava, needsSetup: true };
-  }
-  try {
-    const s = getStore().get('settings') as any;
-    getStore().set('settings', { ...s, javaPath: javaBoot.javaPath });
-  } catch {
-    /* */
   }
 
   let preferredVersionId: string | undefined;
@@ -475,13 +406,16 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   if (!installed.ok) return { ok: false, message: installed.message, needsSetup: true };
 
   const mcDir = getDefaultMinecraftDir();
+  const gameDir = installed.instanceDir || getTtInstanceDir(loader, mcVersion);
+  fs.mkdirSync(gameDir, { recursive: true });
+
   let instance = getDefaultInstance() || ensureTtInstance();
   if (installed.jarPath) {
     instance =
       updateInstance(instance.id, {
         ttClientJar: installed.jarPath,
         ttClientVersion: loader + '-' + mcVersion,
-        gameDir: mcDir,
+        gameDir,
         minecraftVersion: mcVersion,
       }) || instance;
   }
@@ -491,8 +425,15 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   report(52, 'java', 'Java: ' + java);
 
   const identity = getLaunchIdentity(account);
-  report(55, 'loader', 'Finding ' + loader + ' profile for ' + mcVersion + '…');
+  if (!identity.accessToken || identity.accessToken === '0' || identity.offline) {
+    report(
+      53,
+      'account',
+      'Warning: no Microsoft access token — open official Minecraft Launcher, sign in, then Launch again or servers will hang.',
+    );
+  }
 
+  report(55, 'loader', 'Finding ' + loader + ' profile for ' + mcVersion + '…');
   let found =
     preferredVersionId &&
     (() => {
@@ -513,7 +454,7 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   if (!found) {
     return {
       ok: false,
-      message: 'No ' + loader + ' install found for ' + mcVersion + '. Bootstrap may have failed.',
+      message: 'No ' + loader + ' install found for ' + mcVersion + '.',
       needsSetup: true,
     };
   }
@@ -529,10 +470,7 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
 
   report(70, 'libs', 'Building classpath…');
   const jars = collectLibraries(versionJson, mcDir);
-  for (const cj of [
-    path.join(versionDir, versionId + '.jar'),
-    path.join(mcDir, 'versions', mcVersion, mcVersion + '.jar'),
-  ]) {
+  for (const cj of [path.join(versionDir, versionId + '.jar'), path.join(mcDir, 'versions', mcVersion, mcVersion + '.jar')]) {
     if (fs.existsSync(cj) && !jars.includes(cj)) {
       jars.push(cj);
       break;
@@ -554,20 +492,21 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   const mem = instance.memoryMb || settings.memoryMb || 4096;
   const assetsDir = path.join(mcDir, 'assets');
   const assetIndex = versionJson.assetIndex?.id || versionJson.assets || mcVersion;
+  const uuid = formatUuid(identity.uuid);
 
   const vars: Record<string, string> = {
     classpath,
     library_directory: path.join(mcDir, 'libraries'),
     natives_directory: nativesDir,
     launcher_name: 'TT-Launcher',
-    launcher_version: '1.7.6',
+    launcher_version: '1.7.7',
     version_name: versionId,
     version_type: 'release',
-    game_directory: mcDir,
+    game_directory: gameDir,
     assets_root: assetsDir,
     assets_index_name: assetIndex,
     auth_player_name: identity.username,
-    auth_uuid: identity.uuid,
+    auth_uuid: uuid,
     auth_access_token: identity.accessToken || '0',
     user_type: identity.offline ? 'legacy' : 'msa',
     user_properties: '{}',
@@ -589,10 +528,10 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   if (!game.length) {
     game = [
       '--username', identity.username,
-      '--uuid', identity.uuid,
+      '--uuid', uuid,
       '--accessToken', identity.accessToken || '0',
       '--version', versionId,
-      '--gameDir', mcDir,
+      '--gameDir', gameDir,
       '--assetsDir', assetsDir,
       '--assetIndex', assetIndex,
       '--userType', identity.offline ? 'legacy' : 'msa',
@@ -601,12 +540,12 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   }
 
   const args = [...cleanJvm.filter(Boolean), '-cp', classpath, mainClass, ...game.filter(Boolean)];
-  report(88, 'spawn', 'Starting ' + mainClass + ' (' + jars.length + ' libs)…');
+  report(88, 'spawn', 'Starting ' + mainClass + ' · mods: ' + path.join(gameDir, 'mods'));
 
   let child: ChildProcess;
   try {
     child = spawn(java, args, {
-      cwd: mcDir,
+      cwd: gameDir,
       env: { ...process.env },
       detached: false,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -655,33 +594,18 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
     });
   });
 
-  const fatalJvm =
-    /Could not create the Java Virtual Machine/i.test(earlyLog) ||
-    /UnsupportedClassVersionError/i.test(earlyLog) ||
-    /Unrecognized option:/i.test(earlyLog);
-
-  if (earlyExit || fatalJvm) {
+  if (earlyExit || /UnsupportedClassVersionError|Could not create the Java Virtual Machine/i.test(earlyLog)) {
     running = null;
     try {
       child.kill();
     } catch {
       /* */
     }
-    const snippet = earlyLog.trim().slice(-1500) || '(no output)';
-    ensureLauncherProfile(mcDir, versionId, 'TT Client');
-    const official = findOfficialLauncher();
-    if (official) {
-      try {
-        spawn(official, [], { detached: true, stdio: 'ignore' }).unref();
-        return {
-          ok: true,
-          message: 'Direct launch failed. Opened official launcher — use profile TT Client.\n\n' + snippet,
-        };
-      } catch {
-        /* */
-      }
-    }
-    return { ok: false, message: 'Minecraft failed to start.\n\n' + snippet, needsSetup: true };
+    return {
+      ok: false,
+      message: 'Minecraft failed to start.\n\n' + (earlyLog.trim().slice(-1500) || '(no output)'),
+      needsSetup: true,
+    };
   }
 
   child.on('exit', (code) => {
@@ -690,7 +614,7 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   });
   updateInstance(instance.id, { lastPlayed: Date.now() });
   ensureLauncherProfile(mcDir, versionId, 'TT Client');
-  report(100, 'done', 'Game running (pid ' + child.pid + ') on ' + versionId);
+  report(100, 'done', 'Running ' + versionId + ' · instance ' + path.basename(gameDir));
   return { ok: true, message: 'Launching ' + loader + ' ' + versionId, pid: child.pid };
 }
 
@@ -708,7 +632,6 @@ export function stopGame(): void {
 export function killAllMinecraftProcesses(): { ok: boolean; message: string; killed: string[] } {
   const killed: string[] = [];
   stopGame();
-  killed.push('tt-launcher-child');
   if (process.platform === 'win32') {
     for (const name of ['javaw.exe', 'java.exe', 'Minecraft.exe', 'MinecraftLauncher.exe']) {
       try {
@@ -724,5 +647,5 @@ export function killAllMinecraftProcesses(): { ok: boolean; message: string; kil
       }
     }
   }
-  return { ok: true, message: 'Ended: ' + killed.join(', '), killed };
+  return { ok: true, message: 'Ended: ' + (killed.join(', ') || 'none'), killed };
 }
