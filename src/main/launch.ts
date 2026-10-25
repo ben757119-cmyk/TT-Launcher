@@ -49,7 +49,6 @@ export function getRunningPid(): number | null {
 
 function findJava(configured?: string): string | null {
   if (configured && fs.existsSync(configured)) return configured;
-
   for (const major of [25, 24, 23, 22, 21]) {
     try {
       const managed = getManagedJavaPath(major);
@@ -58,7 +57,6 @@ function findJava(configured?: string): string | null {
       /* */
     }
   }
-
   const isWin = process.platform === 'win32';
   const preferredNames = isWin ? ['javaw.exe', 'java.exe'] : ['java'];
   const home = process.env.USERPROFILE || process.env.HOME || '';
@@ -66,11 +64,9 @@ function findJava(configured?: string): string | null {
   const programFiles = process.env['ProgramFiles'] || 'C:\\Program Files';
   const programFilesX86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
   const candidates: string[] = [];
-
   if (process.env.JAVA_HOME) {
     for (const n of preferredNames) candidates.push(path.join(process.env.JAVA_HOME, 'bin', n));
   }
-
   if (isWin && localApp) {
     const roots = [
       path.join(localApp, 'Packages', 'Microsoft.4297127D64EC6_8wekyb3d8bbwe', 'LocalCache', 'Local', 'runtime'),
@@ -103,7 +99,6 @@ function findJava(configured?: string): string | null {
       }
     }
   }
-
   if (isWin) {
     for (const root of [programFiles, programFilesX86]) {
       for (const vendor of ['Eclipse Adoptium', 'Java', 'Microsoft', 'Amazon Corretto', 'Temurin', 'Zulu']) {
@@ -122,7 +117,6 @@ function findJava(configured?: string): string | null {
       }
     }
   }
-
   const scored = candidates
     .filter((c) => {
       try {
@@ -138,13 +132,10 @@ function findJava(configured?: string): string | null {
       if (lower.includes('jdk-25') || lower.includes('25.')) score += 80;
       if (lower.includes('jdk-24') || lower.includes('24.')) score += 50;
       if (lower.includes('21')) score += 20;
-      if (lower.includes('java-runtime-delta')) score += 10;
       return { c, score };
     })
     .sort((a, b) => b.score - a.score);
-
   if (scored[0]) return scored[0].c;
-
   try {
     const cmd = isWin ? 'where java' : 'which java';
     const out = execSync(cmd, { encoding: 'utf8', timeout: 3000, windowsHide: true })
@@ -199,7 +190,11 @@ function findLoaderVersion(
 ): { versionDir: string; versionId: string; versionJson: any } | null {
   const versionsRoot = path.join(mcDir, 'versions');
   if (!fs.existsSync(versionsRoot)) return null;
-  const folders = fs.readdirSync(versionsRoot, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  const folders = fs
+    .readdirSync(versionsRoot, { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => d.name);
+
   const score = (name: string) => {
     let s = 0;
     const lower = name.toLowerCase();
@@ -210,10 +205,30 @@ function findLoaderVersion(
       if (lower.includes('fabric')) s += 100;
       else return 0;
     }
-    if (preferredMc && lower.includes(preferredMc.toLowerCase())) s += 80;
+    if (preferredMc) {
+      const pref = preferredMc.toLowerCase();
+      // Never pick 26.1 when user asked for 26.2
+      if (lower.includes(pref)) {
+        s += 200;
+      } else {
+        const m = pref.match(/^1\.(\d+)(?:\.(\d+))?$/);
+        if (m) {
+          const nfPref = m[1] + '.' + (m[2] ?? '0');
+          if (lower.includes(nfPref)) s += 200;
+          else return 0;
+        } else {
+          return 0;
+        }
+      }
+    }
     return s;
   };
-  const ranked = folders.map((name) => ({ name, score: score(name) })).filter((x) => x.score > 0).sort((a, b) => b.score - a.score);
+
+  const ranked = folders
+    .map((name) => ({ name, score: score(name) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || b.name.localeCompare(a.name));
+
   for (const { name } of ranked) {
     const jsonPath = path.join(versionsRoot, name, name + '.json');
     if (!fs.existsSync(jsonPath)) continue;
@@ -309,12 +324,6 @@ function extractNatives(versionJson: any, mcDir: string, nativesDir: string): vo
       const classifier = String(lib.natives[osKey]).replace('${arch}', process.arch === 'x64' ? '64' : '32');
       const classifiers = lib.downloads?.classifiers;
       if (classifiers?.[classifier]?.path) nativePath = path.join(libRoot, classifiers[classifier].path);
-    } else if (lib.name && String(lib.name).includes(':natives-')) {
-      const parts = String(lib.name).split(':');
-      if (parts.length >= 4 && parts[3].includes('natives-' + osKey)) {
-        const [g, a, v, classifier] = parts;
-        nativePath = path.join(libRoot, ...g.split('.'), a, v, a + '-' + v + '-' + classifier + '.jar');
-      }
     }
     if (!nativePath || !fs.existsSync(nativePath)) continue;
     try {
@@ -437,7 +446,7 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   }
 
   const needJava = requiredJavaForMc(mcVersion);
-  report(12, 'bootstrap', 'Ensuring managed Java ' + needJava + ' (TT folder only, not system-wide)…');
+  report(12, 'bootstrap', 'Ensuring managed Java ' + needJava + ' (TT folder only)…');
   const javaBoot = await ensureManagedJava(needJava, (p) =>
     report(Math.min(30, 12 + p.pct * 0.15), p.step, p.log),
   );
@@ -451,12 +460,14 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
     /* */
   }
 
+  let preferredVersionId: string | undefined;
   if (loader === 'neoforge') {
     report(32, 'bootstrap', 'Ensuring NeoForge for ' + mcVersion + '…');
     const nf = await ensureNeoForgeClient(mcVersion, javaBoot.javaPath, (p) =>
       report(Math.min(45, 32 + p.pct * 0.12), p.step, p.log),
     );
     if (!nf.ok) return { ok: false, message: nf.message, needsSetup: true };
+    preferredVersionId = nf.versionId;
   }
 
   report(46, 'install', 'Installing TT Client for ' + loader + ' ' + mcVersion + '…');
@@ -475,16 +486,30 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
       }) || instance;
   }
 
-  report(50, 'java', 'Using managed Java…');
   const java = getManagedJavaPath(needJava) || javaBoot.javaPath || findJava(settings.javaPath);
-  if (!java) {
-    return { ok: false, message: 'Java not found after bootstrap.', needsSetup: true };
-  }
+  if (!java) return { ok: false, message: 'Java not found after bootstrap.', needsSetup: true };
   report(52, 'java', 'Java: ' + java);
 
   const identity = getLaunchIdentity(account);
   report(55, 'loader', 'Finding ' + loader + ' profile for ' + mcVersion + '…');
-  const found = findLoaderVersion(mcDir, loader, mcVersion);
+
+  let found =
+    preferredVersionId &&
+    (() => {
+      const jsonPath = path.join(mcDir, 'versions', preferredVersionId, preferredVersionId + '.json');
+      if (!fs.existsSync(jsonPath)) return null;
+      try {
+        return {
+          versionDir: path.join(mcDir, 'versions', preferredVersionId),
+          versionId: preferredVersionId,
+          versionJson: JSON.parse(fs.readFileSync(jsonPath, 'utf8')),
+        };
+      } catch {
+        return null;
+      }
+    })();
+
+  if (!found) found = findLoaderVersion(mcDir, loader, mcVersion);
   if (!found) {
     return {
       ok: false,
@@ -494,7 +519,7 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   }
 
   const { versionDir, versionId } = found;
-  report(60, 'resolve', 'Resolving version chain for ' + versionId + '…');
+  report(60, 'resolve', 'Using version ' + versionId + '…');
   const versionJson = resolveVersionJson(mcDir, versionId);
   const mainClass =
     versionJson.mainClass ||
@@ -535,7 +560,7 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
     library_directory: path.join(mcDir, 'libraries'),
     natives_directory: nativesDir,
     launcher_name: 'TT-Launcher',
-    launcher_version: '1.7.5',
+    launcher_version: '1.7.6',
     version_name: versionId,
     version_type: 'release',
     game_directory: mcDir,
@@ -665,7 +690,7 @@ export async function launchGame(): Promise<{ ok: boolean; message: string; pid?
   });
   updateInstance(instance.id, { lastPlayed: Date.now() });
   ensureLauncherProfile(mcDir, versionId, 'TT Client');
-  report(100, 'done', 'Game running (pid ' + child.pid + ')');
+  report(100, 'done', 'Game running (pid ' + child.pid + ') on ' + versionId);
   return { ok: true, message: 'Launching ' + loader + ' ' + versionId, pid: child.pid };
 }
 
