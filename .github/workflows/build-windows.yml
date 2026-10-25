@@ -21,7 +21,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
+          # no cache — repo has no package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -35,7 +35,8 @@ jobs:
         shell: pwsh
         run: |
           python scripts/package-tt-variants.py
-          Get-ChildItem -Path resources/bundled/variants -Recurse -Filter *.jar | ForEach-Object { $_.FullName + " " + $_.Length }
+          Get-ChildItem -Path resources/bundled/variants -Recurse -Filter *.jar -ErrorAction SilentlyContinue |
+            ForEach-Object { "$($_.FullName) $($_.Length)" }
 
       - name: Build renderer + electron
         run: npm run build
