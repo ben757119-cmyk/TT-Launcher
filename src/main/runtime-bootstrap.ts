@@ -1,9 +1,8 @@
 /**
- * Managed runtimes for TT Launcher — isolated under Electron userData.
+ * Managed runtimes — isolated under %LOCALAPPDATA%/TT-Client (survives launcher reinstalls).
  * Does NOT install system-wide Java or modify PATH / registry.
  */
 
-import { app } from 'electron';
 import fs from 'fs';
 import path from 'path';
 import { execSync, spawn } from 'child_process';
@@ -14,20 +13,26 @@ import { getDefaultMinecraftDir } from './vanilla-mc';
 
 export type BootstrapProgress = { pct: number; step: string; log: string };
 
-function userDataRoot(): string {
-  try {
-    return app.getPath('userData');
-  } catch {
-    return path.join(process.env.APPDATA || process.env.HOME || '.', 'TT-Launcher');
+function stableDataRoot(): string {
+  if (process.platform === 'win32') {
+    const base =
+      process.env.LOCALAPPDATA ||
+      process.env.APPDATA ||
+      path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+    return path.join(base, 'TT-Client');
   }
+  if (process.platform === 'darwin') {
+    return path.join(process.env.HOME || '', 'Library', 'Application Support', 'TT-Client');
+  }
+  return path.join(process.env.HOME || '', '.local', 'share', 'TT-Client');
 }
 
 export function runtimesDir(): string {
-  return path.join(userDataRoot(), 'runtimes');
+  return path.join(stableDataRoot(), 'runtimes');
 }
 
 export function cacheDir(): string {
-  return path.join(userDataRoot(), 'cache');
+  return path.join(stableDataRoot(), 'cache');
 }
 
 function report(
@@ -47,7 +52,7 @@ function report(
 function httpsGetText(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
     https
-      .get(url, { headers: { 'User-Agent': 'TT-Launcher/1.7.6' } }, (res) => {
+      .get(url, { headers: { 'User-Agent': 'TT-Launcher/1.7.7' } }, (res) => {
         if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
           httpsGetText(res.headers.location).then(resolve, reject);
           return;
@@ -84,31 +89,22 @@ function findJavaBinary(root: string): string | null {
       }
     }
   }
-  const stack2 = [root];
-  seen = 0;
-  while (stack2.length && seen < 400) {
-    const dir = stack2.pop()!;
-    seen++;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.isFile() && names.includes(e.name)) return full;
-      if (e.isDirectory() && !e.name.startsWith('.')) stack2.push(full);
-    }
-  }
   return null;
 }
 
 export function getManagedJavaPath(major: number): string | null {
   const root = path.join(runtimesDir(), 'jdk-' + major);
+  const bin = findJavaBinary(root);
+  if (!bin) return null;
   const marker = path.join(root, '.tt-ready');
-  if (!fs.existsSync(marker)) return null;
-  return findJavaBinary(root);
+  if (!fs.existsSync(marker)) {
+    try {
+      fs.writeFileSync(marker, new Date().toISOString(), 'utf8');
+    } catch {
+      /* */
+    }
+  }
+  return bin;
 }
 
 export async function ensureManagedJava(
@@ -117,7 +113,7 @@ export async function ensureManagedJava(
 ): Promise<{ ok: boolean; javaPath?: string; message: string }> {
   const existing = getManagedJavaPath(major);
   if (existing) {
-    report(onProgress, 100, 'java', 'Using managed Java ' + major + ': ' + existing);
+    report(onProgress, 100, 'java', 'Using cached Java ' + major + ' (no re-download): ' + existing);
     return { ok: true, javaPath: existing, message: 'Managed Java ' + major + ' ready' };
   }
 
@@ -139,39 +135,31 @@ export async function ensureManagedJava(
 
   const zipPath = path.join(cacheDir(), 'jdk-' + major + '-' + os + '-' + arch + '.zip');
 
-  report(onProgress, 5, 'java', 'Downloading Temurin JDK ' + major + ' (managed, TT folder only)…');
-
-  try {
-    await downloadFile(
-      api,
-      zipPath,
-      (p) => {
-        if (p.percent != null) {
-          report(
-            onProgress,
-            5 + Math.round((p.percent / 100) * 55),
-            'java',
-            'Downloading Java ' + major + '… ' + p.percent + '%',
-          );
-        }
-      },
-      600000,
-    );
-  } catch (e: any) {
-    return {
-      ok: false,
-      message:
-        'Failed to download Java ' +
-        major +
-        ': ' +
-        (e?.message || e) +
-        '\nInstall Temurin ' +
-        major +
-        ' from https://adoptium.net/',
-    };
+  // Reuse cached zip if present
+  if (!fs.existsSync(zipPath)) {
+    report(onProgress, 5, 'java', 'Downloading Temurin JDK ' + major + ' (one-time, cached under LocalAppData\\TT-Client)…');
+    try {
+      await downloadFile(
+        api,
+        zipPath,
+        (p) => {
+          if (p.percent != null) {
+            report(onProgress, 5 + Math.round((p.percent / 100) * 55), 'java', 'Downloading Java ' + major + '… ' + p.percent + '%');
+          }
+        },
+        600000,
+      );
+    } catch (e: any) {
+      return {
+        ok: false,
+        message: 'Failed to download Java ' + major + ': ' + (e?.message || e),
+      };
+    }
+  } else {
+    report(onProgress, 40, 'java', 'Using cached Java zip (no network download)…');
   }
 
-  report(onProgress, 65, 'java', 'Extracting Java ' + major + ' into TT Launcher folder…');
+  report(onProgress, 65, 'java', 'Extracting Java ' + major + '…');
   try {
     execSync('tar -xf "' + zipPath + '" -C "' + root + '"', {
       windowsHide: true,
@@ -197,13 +185,10 @@ export async function ensureManagedJava(
   return { ok: true, javaPath, message: 'Installed managed Java ' + major };
 }
 
-/** MC 1.21.1 → 21.1 | MC 1.21 → 21.0 | MC 26.2 → 26.2 */
 function mcToNeoForgePrefix(mcVersion: string): string {
   const v = String(mcVersion || '').trim();
   const m = v.match(/^1\.(\d+)(?:\.(\d+))?$/);
-  if (m) {
-    return m[1] + '.' + (m[2] ?? '0');
-  }
+  if (m) return m[1] + '.' + (m[2] ?? '0');
   return v;
 }
 
@@ -229,7 +214,6 @@ async function resolveNeoForgeVersion(mcFamily: string): Promise<string | null> 
       });
       return matched[0];
     }
-    log.warn('No NeoForge versions matched prefix', { mcFamily, prefix, sample: versions.slice(-5) });
   } catch (e) {
     log.warn('NeoForge metadata fetch failed', { err: String(e) });
   }
@@ -245,12 +229,7 @@ function neoforgeAlreadyInstalled(mcDir: string, mcFamily: string): string | nul
     .filter((n) => {
       const lower = n.toLowerCase();
       if (!lower.includes('neoforge')) return false;
-      const pref = prefix.toLowerCase();
-      const fam = mcFamily.toLowerCase();
-      // Strict: 26.2 must not match 26.1
-      if (lower.includes(pref)) return true;
-      if (lower.includes(fam)) return true;
-      return false;
+      return lower.includes(prefix.toLowerCase()) || lower.includes(mcFamily.toLowerCase());
     })
     .sort()
     .reverse();
@@ -274,12 +253,7 @@ export async function ensureNeoForgeClient(
   if (!nfVer) {
     return {
       ok: false,
-      message:
-        'Could not resolve NeoForge for ' +
-        mcFamily +
-        ' (prefix ' +
-        mcToNeoForgePrefix(mcFamily) +
-        ').\nInstall from https://neoforged.net/ once.',
+      message: 'Could not resolve NeoForge for ' + mcFamily + '. Install from https://neoforged.net/',
     };
   }
 
@@ -291,40 +265,24 @@ export async function ensureNeoForgeClient(
     '-installer.jar';
   const installerPath = path.join(cacheDir(), 'neoforge-' + nfVer + '-installer.jar');
 
-  report(onProgress, 20, 'neoforge', 'Downloading NeoForge ' + nfVer + ' installer…');
-  try {
-    await downloadFile(
-      installerUrl,
-      installerPath,
-      (p) => {
-        if (p.percent != null) {
-          report(
-            onProgress,
-            20 + Math.round((p.percent / 100) * 40),
-            'neoforge',
-            'Downloading installer… ' + p.percent + '%',
-          );
-        }
-      },
-      300000,
-    );
-  } catch (e: any) {
-    return {
-      ok: false,
-      message: 'Failed to download NeoForge installer: ' + (e?.message || e),
-    };
+  if (!fs.existsSync(installerPath)) {
+    report(onProgress, 20, 'neoforge', 'Downloading NeoForge ' + nfVer + ' installer…');
+    try {
+      await downloadFile(installerUrl, installerPath, undefined, 300000);
+    } catch (e: any) {
+      return { ok: false, message: 'Failed to download NeoForge installer: ' + (e?.message || e) };
+    }
   }
 
-  report(onProgress, 65, 'neoforge', 'Running NeoForge installer (client → .minecraft)…');
+  report(onProgress, 65, 'neoforge', 'Running NeoForge installer…');
   let installerJava = javaPath;
   if (installerJava.toLowerCase().endsWith('javaw.exe')) {
     const alt = installerJava.slice(0, -8) + 'java.exe';
     if (fs.existsSync(alt)) installerJava = alt;
   }
-  const args = ['-jar', installerPath, '--installClient', mcDir];
   try {
     await new Promise<void>((resolve, reject) => {
-      const child = spawn(installerJava, args, {
+      const child = spawn(installerJava, ['-jar', installerPath, '--installClient', mcDir], {
         cwd: cacheDir(),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -332,10 +290,6 @@ export async function ensureNeoForgeClient(
       let err = '';
       child.stderr?.on('data', (d) => {
         err += d.toString();
-        report(onProgress, 75, 'neoforge', d.toString().trim().slice(0, 180));
-      });
-      child.stdout?.on('data', (d) => {
-        report(onProgress, 75, 'neoforge', d.toString().trim().slice(0, 180));
       });
       child.on('error', reject);
       child.on('exit', (code) => {
@@ -344,20 +298,13 @@ export async function ensureNeoForgeClient(
       });
     });
   } catch (e: any) {
-    return {
-      ok: false,
-      message: 'NeoForge installer failed: ' + (e?.message || e),
-    };
+    return { ok: false, message: 'NeoForge installer failed: ' + (e?.message || e) };
   }
 
   const after = neoforgeAlreadyInstalled(mcDir, mcFamily);
   if (!after) {
-    return {
-      ok: false,
-      message: 'Installer finished but NeoForge ' + mcFamily + ' was not found in versions/.',
-    };
+    return { ok: false, message: 'Installer finished but NeoForge ' + mcFamily + ' not found.' };
   }
-
   report(onProgress, 100, 'neoforge', 'NeoForge installed: ' + after);
   return { ok: true, versionId: after, message: 'Installed NeoForge ' + after };
 }

@@ -1,3 +1,8 @@
+/**
+ * Install TT Client jar for the selected loader + MC version only.
+ * Uses .minecraft/tt-instances/<loader>-<mc>/mods (not shared mods/).
+ */
+
 import fs from 'fs';
 import path from 'path';
 import { app } from 'electron';
@@ -70,14 +75,11 @@ export function findTargetBuild(loader: TtLoader, mcVersion: string): TargetBuil
       minecraft: mcVersion,
       jar: rel,
       status: loader === 'neoforge' && mcVersion === '26.2' ? 'supported' : 'best-effort',
-      note:
-        loader === 'neoforge' && mcVersion === '26.2'
-          ? undefined
-          : 'Closest available TT Client binary for this target',
     };
   }
-  if (loader === 'neoforge' && resolveBundledFile(BUNDLED.ttJar)) {
-    return { loader: 'neoforge', minecraft: mcVersion || '26.2', jar: BUNDLED.ttJar, status: 'supported' };
+  // Root jar is ONLY for NeoForge 26.2 — never for 26.1 / 1.21.x
+  if (loader === 'neoforge' && mcVersion === '26.2' && resolveBundledFile(BUNDLED.ttJar)) {
+    return { loader: 'neoforge', minecraft: '26.2', jar: BUNDLED.ttJar, status: 'supported' };
   }
   return null;
 }
@@ -120,6 +122,11 @@ function disableOtherTtJars(modsDir: string, keepName: string) {
   }
 }
 
+/** Instance root: .minecraft/tt-instances/<loader>-<mcVersion>/ */
+export function getTtInstanceDir(loader: TtLoader, mcVersion: string): string {
+  return path.join(getDefaultMinecraftDir(), 'tt-instances', `${loader}-${mcVersion}`);
+}
+
 export function installTarget(
   loader: TtLoader,
   mcVersion: string,
@@ -129,18 +136,25 @@ export function installTarget(
   jarPath?: string;
   packPath?: string;
   build?: TargetBuild;
+  instanceDir?: string;
 } {
   const mcDir = getDefaultMinecraftDir();
   ensureMinecraftLayout(mcDir);
-  const modsDir = path.join(mcDir, 'mods');
+
+  const instanceDir = getTtInstanceDir(loader, mcVersion);
+  const modsDir = path.join(instanceDir, 'mods');
   fs.mkdirSync(modsDir, { recursive: true });
+  fs.mkdirSync(path.join(instanceDir, 'config'), { recursive: true });
+  fs.mkdirSync(path.join(instanceDir, 'resourcepacks'), { recursive: true });
 
   const build = findTargetBuild(loader, mcVersion);
   if (!build) {
     return {
       ok: false,
       message:
-        `No TT Client build for ${loader} + Minecraft ${mcVersion}.\n\n` +
+        `No TT Client jar for ${loader} + Minecraft ${mcVersion}.\n\n` +
+        `Full TT Client currently ships for NeoForge 26.2 only.\n` +
+        `Select NeoForge + 26.2.\n\n` +
         `Available:\n` +
         listAvailableTargets()
           .map((b) => `  • ${b.loader} ${b.minecraft} (${b.status})`)
@@ -148,7 +162,16 @@ export function installTarget(
     };
   }
 
-  const src = resolveBundledFile(build.jar) || resolveBundledFile(BUNDLED.ttJar);
+  if (build.minecraft !== mcVersion) {
+    return {
+      ok: false,
+      message:
+        `Jar mismatch: selected ${mcVersion} but jar is for ${build.minecraft}.\n` +
+        `Pick ${build.minecraft} in the version dropdown.`,
+    };
+  }
+
+  const src = resolveBundledFile(build.jar);
   if (!src || !fs.existsSync(src)) {
     return { ok: false, message: `Bundled jar missing: ${build.jar}` };
   }
@@ -157,18 +180,14 @@ export function installTarget(
   const dest = path.join(modsDir, destName);
   fs.copyFileSync(src, dest);
   disableOtherTtJars(modsDir, destName);
-  try {
-    fs.copyFileSync(src, path.join(modsDir, 'ttclient.jar'));
-  } catch {
-    /* */
-  }
 
   const pack = installBundledPackIntoMinecraft(mcDir);
 
-  let message = `Installed TT Client (${build.status}) for ${loader} ${mcVersion}\n→ mods/${destName}`;
-  if (build.note) message += `\n${build.note}`;
+  let message =
+    `Installed TT Client (${build.status}) for ${loader} ${mcVersion}\n` +
+    `→ tt-instances/${loader}-${mcVersion}/mods/${destName}`;
   if (pack?.packPath) message += `\nResource pack → ${path.basename(pack.packPath)}`;
 
-  log.info('installTarget', { loader, mcVersion, dest, status: build.status });
-  return { ok: true, message, jarPath: dest, packPath: pack?.packPath, build };
+  log.info('installTarget', { loader, mcVersion, dest, instanceDir, status: build.status });
+  return { ok: true, message, jarPath: dest, packPath: pack?.packPath, build, instanceDir };
 }
