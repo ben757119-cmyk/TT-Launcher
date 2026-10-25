@@ -10,79 +10,64 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
-    timeout-minutes: 45
+    runs-on:      runs-on: windows-latest
+      timeout-minutes: 45
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      steps:
+        - name: Checkout
+          uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+        - name: Setup Node.js
+          uses: actions/setup-node@v4
+          with:
+            node-version: "20"
+            cache: npm
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        - name: Install dependencies
+          run: npm install --no-audit --no-fund
 
-      - name: Bundle TT Client for all versions
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path resources/bundled | Out-Null
-          $versions = @('26.2','26.1','26.0','1.21.11','1.21.10','1.21.9','1.21.8','1.21.7','1.21.6','1.21.5','1.21.4','1.21.3','1.21.2','1.21.1')
-          $jarUrl = "https://github.com/ben757119-cmyk/TT-Client/releases/download/v1.32.0/ttclient-1.32.0.jar"
-          Invoke-WebRequest -Uri $jarUrl -OutFile resources/bundled/ttclient.jar
-          $builds = @()
-          foreach ($mc in $versions) {
-            $dir = "resources/bundled/variants/neoforge/$mc"
-            New-Item -ItemType Directory -Force -Path $dir | Out-Null
-            Copy-Item resources/bundled/ttclient.jar "$dir/ttclient.jar" -Force
-            $status = if ($mc -eq '26.2') { 'supported' } elseif ($mc -match '^26') { 'experimental' } else { 'best-effort' }
-            $note = if ($mc -eq '26.2') { $null } else { 'TT Client 1.32.0 built for NeoForge 26.2 — closest binary for this MC version. Install matching NeoForge.' }
-            $builds += @{ loader = 'neoforge'; minecraft = $mc; jar = "variants/neoforge/$mc/ttclient.jar"; status = $status; note = $note }
-          }
-          $manifest = @{
-            ttClientVersion = '1.32.0'
-            resourcePack = 'TT-Client-ResourcePack.zip'
-            builds = $builds
-            unsupported = @{
-              fabric = 'Full Fabric port is in progress (TT Client Lite). Use NeoForge for the complete client.'
+        - name: Ensure TT Client 26.2 jar only
+          shell: pwsh
+          run: |
+            New-Item -ItemType Directory -Force -Path resources/bundled/variants/neoforge/26.2 | Out-Null
+            if (Test-Path resources/bundled/ttclient.jar) {
+              Copy-Item resources/bundled/ttclient.jar resources/bundled/variants/neoforge/26.2/ttclient.jar -Force
             }
-          }
-          $manifest | ConvertTo-Json -Depth 8 | Set-Content resources/bundled/manifest.json -Encoding utf8
-          Get-ChildItem -Recurse resources/bundled | Format-Table FullName, Length
+            Get-ChildItem -Path resources/bundled/variants -Recurse -Filter ttclient.jar -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -notmatch 'neoforge[\\/]26\.2[\\/]' } |
+              Remove-Item -Force
+            Write-Host "Bundled jars:"
+            Get-ChildItem -Path resources/bundled -Recurse -Filter *.jar | ForEach-Object { $_.FullName }
 
-      - name: Build renderer + electron
-        run: npm run build
+        - name: Build renderer + electron
+          run: npm run build
 
-      - name: Package Windows (NSIS + portable)
-        run: npx electron-builder --win --x64 --publish never
-        env:
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        - name: Package Windows (NSIS + portable)
+          run: npx electron-builder --win --x64 --publish never
+          env:
+            CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
-      - name: List release artifacts
-        run: Get-ChildItem -Recurse release | Format-Table Name, Length
+        - name: Upload build artifacts
+          uses: actions/upload-artifact@v4
+          with:
+            name: TT-Launcher-Windows
+            path: |
+              release/*.exe
+              release/*.yml
+            if-no-files-found: warn
+            retention-days: 30
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: TT-Launcher-Windows
-          path: |
-            release/*.exe
-          if-no-files-found: warn
-          retention-days: 30
-
-      - name: Create GitHub Release
-        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ github.run_number }}
-          name: TT Launcher build ${{ github.run_number }}
-          draft: false
-          prerelease: true
-          files: |
-            release/*.exe
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
+        - name: Create GitHub Release
+          if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+          uses: softprops/action-gh-release@v2
+          with:
+            tag_name: v${{ github.run_number }}
+            name: TT Launcher build ${{ github.run_number }}
+            draft: false
+            prerelease: true
+            files: |
+              release/*.exe
+            generate_release_notes: true
+          env:
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          continue-on-error: true

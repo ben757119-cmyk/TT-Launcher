@@ -1,0 +1,16 @@
+{
+  "ttClientVersion": "1.32.0",
+  "resourcePack": "TT-Client-ResourcePack.zip",
+  "builds": [
+    {
+      "loader": "neoforge",
+      "minecraft": "26.2",
+      "jar": "variants/neoforge/26.2/ttclient.jar",
+      "status": "supported"
+    }
+  ],
+  "unsupported": {
+    "fabric": "Fabric port not published yet — select NeoForge.",
+    "other": "Full TT Client ships for NeoForge 26.2. Other versions launch NeoForge only with the same instance layout."
+  }
+}
